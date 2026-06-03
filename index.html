@@ -350,6 +350,33 @@ body.edit-mode .edit-hint{display:block;}
   .pg-hero-inner p{font-size:1rem;line-height:1.55;margin-bottom:18px;}
 }
 h1,h2,h3,.ph-h1{text-wrap:balance;}
+/* Mobile-only hero elements (hidden on desktop) */
+.mobile-hero-logo{display:none;}
+.mobile-cta-label{display:none;}
+@media(max-width:760px){
+  #p-home .hero-trust-pro{display:none;}
+  .mobile-trust-strip{display:block!important;}
+  .mobile-hero-logo{display:block;width:auto;max-width:86%;max-height:26vh;height:auto;margin:0 auto;object-fit:contain;}
+  .mobile-cta-label{display:flex;align-items:center;justify-content:center;gap:8px;font-weight:800;font-size:0.95rem;color:var(--blue);margin:4px 0 4px;text-align:center;}
+  .mcl-arrow{display:inline-block;font-size:1.15rem;animation:strideBounce 1s infinite;}
+  /* Home hero on mobile: pack everything above the fold */
+  #p-home .hero{min-height:0;padding-bottom:0;}
+  #p-home .hero-inner{padding:22px 0 0;gap:0;display:flex;flex-direction:column;min-height:0;}
+  #p-home .hero-left{display:flex;flex-direction:column;}
+  #p-home .hero-left h1{font-size:2.35rem;line-height:1.12;margin-bottom:14px;}
+  #p-home .hero-desc{font-size:1.18rem;line-height:1.45;margin-bottom:18px;}
+  #p-home .pill{margin-bottom:12px;padding:4px 11px;font-size:0.72rem;}
+  #p-home .mobile-cta-label{margin:14px 0 8px;}
+  #p-home .mf{margin-bottom:0;}
+  #p-home .mobile-hero-logo{margin-top:-20px;margin-bottom:0;}
+  #p-home .mf input[type="email"]{padding:11px 14px;font-size:0.95rem;}
+  #p-home .mf input[type="submit"]{padding:11px 18px;font-size:0.95rem;}
+  /* Compact ROI block line-height so "of new profit!" sits tight */
+  .roi-n{line-height:1.05;font-size:2rem;}
+  /* For Organizations hero: extend to viewport bottom on mobile */
+  #p-for-organizations .pg-hero{min-height:100vh!important;display:flex;flex-direction:column;justify-content:space-between;}
+}
+@keyframes strideBounce{0%,100%{transform:translateY(0);}50%{transform:translateY(5px);}}
 @keyframes strideConfetti{
   0%{opacity:0;transform:translateY(0) rotate(0deg);}
   10%{opacity:1;}
@@ -394,7 +421,9 @@ h1,h2,h3,.ph-h1{text-wrap:balance;}
       <h1>The daily habit that<br>helps you keep<br><em>the life you love.</em></h1>
       
       <p class="hero-desc">1-minute personalized exercises and brain games for older adults, to keep you independent and prevent decline.</p>
+      <div class="mobile-cta-label">Join The Waitlist <span class="mcl-arrow">&#x2193;</span></div>
       <form action="https://queensu.us5.list-manage.com/subscribe/post?u=eb869aef95058857754d68188&amp;id=0d580d7d9b&amp;f_id=004ff2e0f0" method="post" name="hero" class="validate mf" target="_blank" novalidate><input type="email" name="EMAIL" placeholder="Enter your email address" required style="flex:1;min-width:280px;padding:15px 22px;border-radius:50px;font-size:1rem;font-family:'Plus Jakarta Sans',sans-serif;outline:none;background:#fff;border:2px solid #c5d5ea;color:#0D1B2A;transition:border 0.2s;"><div aria-hidden="true" style="position:absolute;left:-5000px;"><input type="text" name="b_eb869aef95058857754d68188_0d580d7d9b" tabindex="-1" value=""></div><input type="submit" value="Join The Waitlist" style="background:#3B64C2;color:#fff;font-family:'Plus Jakarta Sans',sans-serif;font-weight:700;font-size:1rem;border:none;cursor:pointer;border-radius:50px;padding:15px 24px;white-space:nowrap;box-shadow:0 4px 14px rgba(59,100,194,0.22);"></form>
+      <img class="mobile-hero-logo" src="/stride-logo-big.png" alt="Stride">
        <div class="hero-trust-pro">
          <div class="ht-pro"><span class="ht-check">✓</span><span>Physio-backed exercises</span></div>
         <div class="ht-sep"></div>
@@ -406,6 +435,15 @@ h1,h2,h3,.ph-h1{text-wrap:balance;}
     <div class="hero-phone">
       <img src="/stride-hero.png" alt="Stride app" style="max-height:88vh;width:auto;height:auto;display:block;">
     </div>
+  </div>
+</section>
+<section class="mobile-trust-strip" style="display:none;background:#f3f7fd;padding:18px 4%;border-bottom:1px solid var(--border);">
+  <div class="hero-trust-pro" style="margin:0 auto;">
+    <div class="ht-pro"><span class="ht-check">✓</span><span>Physio-backed exercises</span></div>
+    <div class="ht-sep"></div>
+    <div class="ht-pro"><span class="ht-check">✓</span><span>Thinkie brain games</span></div>
+    <div class="ht-sep"></div>
+    <div class="ht-pro"><span class="ht-check">✓</span><span>Web, tablet &amp; mobile</span></div>
   </div>
 </section>
 
@@ -833,11 +871,11 @@ h1,h2,h3,.ph-h1{text-wrap:balance;}
       <div class="org-impact">
         <div class="org-impact-col">
           <div class="org-impact-lbl up">&uarr; Increase</div>
-          <ul><li>ROI</li><li>Longevity</li><li>Family trust</li><li>Leads</li></ul>
+          <ul><li>Profit</li><li>Leads</li><li>Family Trust</li><li>Longevity</li></ul>
         </div>
         <div class="org-impact-col">
           <div class="org-impact-lbl dn">&darr; Reduce</div>
-          <ul><li>Client turnover</li><li>Care complexity</li><li>Accidents &amp; falls</li><li>Staff burden</li></ul>
+          <ul><li>Client turnover</li><li>Care complexity</li><li>Accidents &amp; falls</li><li>Staff turnover</li></ul>
         </div>
       </div>
       <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;">
@@ -879,7 +917,7 @@ h1,h2,h3,.ph-h1{text-wrap:balance;}
         <div class="roi-card">
           <h4>The ROI</h4>
           <div class="roi-n">$34,000 of new profit!</div>
-          <div class="roi-s">50 clients × 2 extra months = $34,000 retained revenue at $20/month</div>
+          <div class="roi-s">50 clients × 2 extra months = $34,000 new profit at a cost of $20/month</div>
           <div class="roi-i">Based on 30hr/week clients, $4.00/hr margin, 14-month avg tenure</div>
           <div class="roi-i">Stride cost: $20/client/month</div>
           <div class="roi-i">Profit based on 50 clients: <strong style="color:#fff;">$34,000</strong></div>
@@ -1362,6 +1400,13 @@ document.addEventListener('DOMContentLoaded', function() {
     function cleanup(){ try{ delete window[name]; }catch(e){ window[name] = undefined; } if(s.parentNode) s.parentNode.removeChild(s); }
     document.body.appendChild(s);
     setTimeout(function(){ if(!done){ done = true; cb(new Error('timeout')); cleanup(); } }, 8000);
+  }
+
+  if(window.innerWidth <= 760){
+    document.addEventListener('DOMContentLoaded', function(){
+      var sb = document.querySelector('form[name="hero"] input[type="submit"]');
+      if(sb) sb.value = 'Take Your Stride!';
+    });
   }
 
   function closeMobileNav(){
