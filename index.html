@@ -8,8 +8,6 @@
 <link rel="apple-touch-icon" href="/favicon.png">
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Lora:ital,wght@0,600;0,700;1,600&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
-<script src="//s3.amazonaws.com/downloads.mailchimp.com/js/mc-validate.js"></script>
-<script>(function($){window.fnames=new Array();window.ftypes=new Array();fnames[0]='EMAIL';ftypes[0]='email';}(jQuery));var $mcj=jQuery.noConflict(true);</script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 :root{
@@ -1499,28 +1497,26 @@ document.addEventListener('DOMContentLoaded', function() {
     return wrap;
   }
 
+  var GS_URL = 'https://script.google.com/macros/s/AKfycbzTblybqM24RGSK5qwfMjgRrImkn0QONwjJOnma5saIctZsUvTawcp0FBKVjSHkYS9vow/exec';
+
   function handleSubmit(e){
     var form = e.target;
     if(!form || !form.classList || !form.classList.contains('mf')) return;
-    if(form.dataset.mcHandled === '1') return;
+    e.preventDefault();
     var emailEl = form.querySelector('input[type="email"]');
     if(!emailEl || !emailEl.value) return;
     var email = emailEl.value.trim();
+    if(!email) return;
     var submitEl = form.querySelector('input[type="submit"]');
-    if(submitEl){ submitEl.disabled = true; submitEl.dataset.orig = submitEl.value; submitEl.value = 'Joining\u2026'; }
-    var frameName = 'mc_iframe_' + Date.now() + '_' + Math.floor(Math.random()*1e6);
-    var iframe = document.createElement('iframe');
-    iframe.name = frameName; iframe.style.display = 'none';
-    document.body.appendChild(iframe);
-    form.target = frameName;
-    form.dataset.mcHandled = '1';
-    setTimeout(function(){
+    if(submitEl){ submitEl.disabled = true; submitEl.value = 'Joining\u2026'; }
+    function showSuccess(){
       var ty = buildShareState(email);
       if(form.parentNode) form.parentNode.replaceChild(ty, form);
-      try{ fireConfetti(); }catch(e){}
-      try{ if(window.gtag){ window.gtag('event','waitlist_signup'); } }catch(e){}
-      setTimeout(function(){ if(iframe.parentNode) iframe.parentNode.removeChild(iframe); }, 6000);
-    }, 1500);
+      try{ fireConfetti(); }catch(ex){}
+      try{ if(window.gtag){ window.gtag('event','waitlist_signup'); } }catch(ex){}
+    }
+    fetch(GS_URL + '?email=' + encodeURIComponent(email), { method: 'GET', mode: 'no-cors' })
+      .then(showSuccess).catch(showSuccess);
   }
   document.addEventListener('submit', handleSubmit, true);
 
