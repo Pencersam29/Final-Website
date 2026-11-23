@@ -4139,7 +4139,7 @@ function startServiceQueries(ctx){
   var token = ++serviceQueryToken;
   if (!ctx || !ctx.city) return;
   if (!ctx.serviceLists) ctx.serviceLists = {};
-  var label = ctx.city + (ctx.region ? ", " + ctx.region : "");
+  var label = marketLabel(ctx.city, ctx.region);
   SERVICE_QUERIES.forEach(function(sq){
     var query = sq.phrase + " in " + label;
     searchPlaces(query, 20).then(function(res){
@@ -6695,7 +6695,7 @@ function showSearchResults(){
        several cities, the city is what tells them apart, and the
        wrong one must never be pickable by accident. A listing with
        no city in its address shows none — one is never invented. */
-    var cityTag = place.city ? (" — " + place.city + (place.region ? ", " + place.region : "")) : "";
+    var cityTag = place.city ? (" — " + place.city + (place.region ? ", " + fullRegionName(place.region) : "")) : "";
     return "<button type='button' data-place='" + idx + "'><span class='rsrc'>" + tag + "</span><span class='rn'>" + esc(place.name + cityTag) + "</span><span class='rd'>" + esc(rd) + "</span></button>";
   }
   /* Live proxy results first — they are the real, current Google listings. */
@@ -6877,8 +6877,9 @@ function modelScoresForLive(place, centreInfo){
 function liveTotal(scores){ return Math.round(scores.distance.score * WEIGHTS.distance + scores.relevance.score * WEIGHTS.relevance + scores.prominence.score * WEIGHTS.prominence); }
 
 /* ---------- Market search, map pack, and “why they're above you” ----------
-   The market search is ALWAYS disambiguated: “home care in City, ST” using
-   the province/state from the picked listing (city + country when the
+   The market search is ALWAYS disambiguated: “home care in City, Full
+   State/Province” using the province/state from the picked listing,
+   spelled out in full — never the two-letter code (city + country when the
    listing carries no region) — never a bare city name, so a same-named
    city in another state/province (Burlington WI / Burlington NC vs
    Burlington, ON) can never leak into the side-by-side. Results are then
@@ -6907,9 +6908,56 @@ function countryFromAddress(addr){
   var last = parts[parts.length - 1] || "";
   return /^[A-Za-z ]+$/.test(last) ? last : "";
 }
+/* The market search ALWAYS names the state/province in FULL — “home
+   care in Hamilton, Ontario”, never “home care in Hamilton, ON”
+   (Sam's rule, Nov 23, 2026). Listings carry the two-letter code
+   (parsed from their addresses, or the verified directory's region
+   field), so every query built from a region goes through
+   fullRegionName. A region that arrives already spelled out passes
+   back in its canonical spelling; anything unrecognised passes
+   through unchanged rather than being dropped or invented. */
+var REGION_FULL_NAMES = {
+  AL:"Alabama", AK:"Alaska", AZ:"Arizona", AR:"Arkansas", CA:"California", CO:"Colorado", CT:"Connecticut", DE:"Delaware", DC:"District of Columbia", FL:"Florida", GA:"Georgia", HI:"Hawaii", ID:"Idaho", IL:"Illinois", IN:"Indiana", IA:"Iowa", KS:"Kansas", KY:"Kentucky", LA:"Louisiana", ME:"Maine", MD:"Maryland", MA:"Massachusetts", MI:"Michigan", MN:"Minnesota", MS:"Mississippi", MO:"Missouri", MT:"Montana", NE:"Nebraska", NV:"Nevada", NH:"New Hampshire", NJ:"New Jersey", NM:"New Mexico", NY:"New York", NC:"North Carolina", ND:"North Dakota", OH:"Ohio", OK:"Oklahoma", OR:"Oregon", PA:"Pennsylvania", RI:"Rhode Island", SC:"South Carolina", SD:"South Dakota", TN:"Tennessee", TX:"Texas", UT:"Utah", VT:"Vermont", VA:"Virginia", WA:"Washington", WV:"West Virginia", WI:"Wisconsin", WY:"Wyoming",
+  AB:"Alberta", BC:"British Columbia", MB:"Manitoba", NB:"New Brunswick", NL:"Newfoundland and Labrador", NS:"Nova Scotia", NT:"Northwest Territories", NU:"Nunavut", ON:"Ontario", ONT:"Ontario", PE:"Prince Edward Island", QC:"Quebec", SK:"Saskatchewan", YT:"Yukon"
+};
+function fullRegionName(region){
+  if (!region) return "";
+  var r = String(region).trim();
+  var hit = REGION_FULL_NAMES[r.toUpperCase()];
+  if (hit) return hit;
+  var low = r.toLowerCase();
+  for (var k in REGION_FULL_NAMES){ if (REGION_FULL_NAMES[k].toLowerCase() === low) return REGION_FULL_NAMES[k]; }
+  return r;
+}
+function isFullRegionName(s){
+  if (!s) return false;
+  var low = String(s).trim().toLowerCase();
+  for (var k in REGION_FULL_NAMES){ if (REGION_FULL_NAMES[k].toLowerCase() === low) return true; }
+  return false;
+}
+/* “City, Full State/Province” — the label every report shows for its
+   market search, matching the query that was actually sent. */
+function marketLabel(city, region){
+  if (!city) return "";
+  return city + (region ? ", " + fullRegionName(region) : "");
+}
+/* A typed market ending in a spelled-out state/province with no comma
+   (“home care in Hamilton Ontario”): split the region off the city so
+   the search can be rebuilt in the canonical full-name form. */
+function splitTrailingRegion(text){
+  var low = " " + String(text || "").trim().toLowerCase();
+  var best = null;
+  for (var k in REGION_FULL_NAMES){
+    var full = REGION_FULL_NAMES[k].toLowerCase();
+    if (low.length > full.length + 1 && low.slice(low.length - full.length - 1) === " " + full && (!best || full.length > best.full.length)) best = { full: REGION_FULL_NAMES[k], len: full.length };
+  }
+  if (!best) return null;
+  var city = String(text).trim().slice(0, String(text).trim().length - best.len).trim();
+  return city ? { city: city, region: best.full } : null;
+}
 function marketQuery(city, region, country){
-  if (region) return "home care in " + city + ", " + region;
-  if (country) return "home care in " + city + ", " + country;
+  if (region) return "home care in " + city + ", " + fullRegionName(region);
+  if (country) return "home care in " + city + ", " + fullRegionName(country);
   return "home care in " + city;
 }
 function sameMarket(pl, city, region){
@@ -6964,7 +7012,7 @@ function sameCountry(pl, country){
 function inReturnedMarket(pl, city, region, country){
   if (!pl) return false;
   if (!sameCountry(pl, country)) return false;
-  if (city && region && pl.city && pl.region && norm(pl.city) === norm(city) && norm(pl.region) !== norm(region)) return false;
+  if (city && region && pl.city && pl.region && norm(pl.city) === norm(city) && norm(fullRegionName(pl.region)) !== norm(fullRegionName(region))) return false;
   return true;
 }
 function nameHasCity(name, city){ return !!city && norm(name).indexOf(norm(city)) > -1; }
@@ -7129,7 +7177,7 @@ function isAgencyListing(agencyPlaceId, agencyName, pl){
    are norm()ed query strings. */
 var VERIFIED_MAPS_OVERRIDES = [
   { name: "Right at Home", city: "Milwaukee", region: "WI", addressMatch: "layton",
-    ranks: { "home care in milwaukee wi": 14, "home care in milwaukee": 4 },
+    ranks: { "home care in milwaukee wi": 14, "home care in milwaukee wisconsin": 14, "home care in milwaukee": 4 },
     top: { name: "Pleasantville Home Care Agency", rating: "4.9", reviews: 58 },
     date: "Nov 17, 2026" }
 ];
@@ -7173,7 +7221,7 @@ function renderLiveReport(place, competitors, opts){
      (Helping Hand: the hero read “Minneapolis, MN — your market”
      because the typed/searched city won over the listing's.) */
   var city = place.city || opts.reqCity || "";
-  var label = city ? (city + (place.region ? ", " + place.region : "")) : "";
+  var label = city ? marketLabel(city, place.region) : "";
   var mapsOverride = verifiedMapsOverride(place, "home care in " + label);
   var rb = document.getElementById("report-banner");
   rb.classList.remove("preview");
@@ -7248,7 +7296,7 @@ function renderLiveReport(place, competitors, opts){
       return { name: c.name, short: c.name, rating: c.rating, reviews: c.reviews, address: c.address, total: liveTotal(s), distance: s.distance, relevance: s.relevance, prominence: s.prominence, city: city, place_id: c.place_id || "" };
     });
     renderGoogleBoard({ name: place.name, city: city, place_id: place.place_id || "" }, all, { preserveOrder: true });
-    document.getElementById("board-sub").textContent = "Live from Google Places for “home care in " + label + "” (city + " + (place.region || "region") + ", never a bare city name, so no same-named city from another province/state is mixed in), in Google's returned order — including agencies in the towns around " + (city || "the searched city") + " that Google ranks for this search; only a same-named city from another state or country is kept out. Places' returned order is its own order — it is not the Google Maps pack order. Every listing above yours carries one line on why it's above you, from data the grader actually has. Ratings and review counts are Google's own, fetched live; factor grades are model estimates.";
+    document.getElementById("board-sub").textContent = "Live from Google Places for “home care in " + label + "” (city + " + (place.region ? fullRegionName(place.region) : "region") + ", never a bare city name, so no same-named city from another province/state is mixed in), in Google's returned order — including agencies in the towns around " + (city || "the searched city") + " that Google ranks for this search; only a same-named city from another state or country is kept out. Places' returned order is its own order — it is not the Google Maps pack order. Every listing above yours carries one line on why it's above you, from data the grader actually has. Ratings and review counts are Google's own, fetched live; factor grades are model estimates.";
   } else {
     document.getElementById("board-sec").style.display = "none";
   }
@@ -7397,7 +7445,7 @@ function runGrade(){
            name is a GLOBAL search, so the “top 3” came back as one
            listing in Ireland, one in Toronto and one in Andover, UK.
            Now: parse city + region out of what was typed, search
-           “home care in City, ST” (top 20), and drop only wrong-market
+           “home care in City, Full State/Province” (top 20), and drop only wrong-market
            contamination (another country, or a same-named city in
            another state) before anything is graded. Google's returned
            order itself is never city-filtered or re-sorted: the
@@ -7410,11 +7458,17 @@ function runGrade(){
           mCity = mParts[0];
           var mTail = mParts[mParts.length - 1];
           if (/^[A-Za-z]{2}$/.test(mTail) && mParts.length > 1) mRegion = mTail.toUpperCase();
+          else if (isFullRegionName(mTail)) mRegion = fullRegionName(mTail);
           else if (mParts.length === 2) mCountry = mTail;
           if (mParts.length > 2 && /^[A-Za-z]{2}$/.test(mParts[1])) mRegion = mParts[1].toUpperCase();
+          if (mParts.length > 2 && !mRegion && isFullRegionName(mParts[1])) mRegion = fullRegionName(mParts[1]);
         } else {
           var mSpace = mCityRaw.match(/^(.+?)\s+([A-Za-z]{2})$/);
           if (mSpace){ mCity = mSpace[1]; mRegion = mSpace[2].toUpperCase(); }
+          else {
+            var mFull = splitTrailingRegion(mCityRaw);
+            if (mFull){ mCity = mFull.city; mRegion = mFull.region; }
+          }
         }
         if (!mRegion && !mCountry){
           var rcKnown = resolveCity(mCity, "");
@@ -7649,7 +7703,7 @@ function buildPreviewAgency(place){
   var prom = 54;
   var total = Math.round(dist*WEIGHTS.distance + rel*WEIGHTS.relevance + prom*WEIGHTS.prominence);
   /* No live Google rank is pulled for a preview — never invent one. */
-  var label = city ? (city + (place.region ? ", " + place.region : "")) : "";
+  var label = city ? marketLabel(city, place.region) : "";
   var lede = found
     ? "Found: " + name + " — " + place.address + ". This preview grades it for “home care in " + label + "” with the same Distance / Relevance / Prominence model as the verified sample on this page. The listing details are real; the factor grades are preview estimates, and your live Google rating, review count and rank aren't pulled here — so none are claimed. The fixes are the point."
     : "This is the same Distance / Relevance / Prominence model used for the verified sample, applied to " + name + " for the search “home care in " + label + "”. Relevance is scored from your name-and-city match; distance and prominence are preview estimates until your live Google listing is checked — so use the grades to find where to look, and the fixes to know what to change.";
@@ -8310,7 +8364,7 @@ function renderPreviewReport(place){
   var a = buildPreviewAgency(place);
   current = "custom";
   var city = place.city || "";
-  var label = city ? (city + (place.region ? ", " + place.region : "")) : "";
+  var label = city ? marketLabel(city, place.region) : "";
   var cityForText = city || "your city";
   var rb = document.getElementById("report-banner");
   rb.classList.add("preview");
@@ -8611,7 +8665,7 @@ function renderNotFound(place){
   document.getElementById("website-sec").style.display = "none";
   current = "notfound";
   var city = place.city || "Toronto";
-  var label = city + (place.region ? ", " + place.region : "");
+  var label = marketLabel(city, place.region);
   var rb = document.getElementById("report-banner");
   rb.classList.add("preview");
   rb.innerHTML = "Report updated — <b>" + esc(place.name) + "</b> · “home care in " + esc(label) + "” · The Places API returned no listing for that search, " + (place.liveZero ? "checked live just now via the proxy" : "checked Nov 10, 2026") + " — that is not proof there is no Maps listing; check Google Maps directly";
