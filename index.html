@@ -1725,13 +1725,29 @@ var OA_DOC = "\u003c!DOCTYPE html\u003e\n\u003chtml lang=\"en\"\u003e\n\u003chea
       pvHead.innerHTML = "<span class='lp-note-brand'></span>";
       pvHead.firstChild.textContent = pvInput.value.trim() || "Your Agency";
     };
+    /* Logo-only gate, same rule as the grader note: the URL must
+       name a logo (or be an SVG) and must not look like a photo or
+       share image, and the loaded file must not be photograph-sized.
+       Anything else is "no logo found" and the note shows the name. */
+    function pvLogoShapeOk(rawUrl){
+      var u = "";
+      try { u = decodeURIComponent(String(rawUrl || "")).toLowerCase(); } catch (e) { u = String(rawUrl || "").toLowerCase(); }
+      if (!u) return false;
+      if (/og[-_]?image|open[-_]?graph|social[-_]?share|share[-_]?image|hero|banner|cover[-_]?photo|photo|photograph|caregiver|elderly|portrait|headshot|stock|slide|gallery|favicon|apple-touch-icon|clearbit|google\.com\/s2|duckduckgo/.test(u)) return false;
+      return /logo|brand[-_]?mark|wordmark/.test(u) || /\.svg(\?|#|$)/.test(u);
+    }
     function pvLoads(url){
       return new Promise(function(res){
-        if (!url) { res(false); return; }
+        if (!url || !pvLogoShapeOk(url)) { res(false); return; }
         var im = new Image();
         var done = false;
         var t = setTimeout(function(){ if (!done){ done = true; res(false); } }, 6000);
-        im.onload = function(){ if (!done){ done = true; clearTimeout(t); res(im.naturalWidth >= 24 || /\.svg(\?|#|$)/i.test(url)); } };
+        im.onload = function(){
+          if (done) return; done = true; clearTimeout(t);
+          var isSvg = /\.svg(\?|#|$)/i.test(url);
+          var sizeOk = isSvg || !(im.naturalWidth >= 900 && im.naturalHeight >= 550) && !(im.naturalWidth * im.naturalHeight >= 900000 && im.naturalHeight >= 420);
+          res(sizeOk && (im.naturalWidth >= 24 || isSvg));
+        };
         im.onerror = function(){ if (!done){ done = true; clearTimeout(t); res(false); } };
         im.src = url;
       });
@@ -1775,10 +1791,13 @@ var OA_DOC = "\u003c!DOCTYPE html\u003e\n\u003chtml lang=\"en\"\u003e\n\u003chea
       var pal = color ? { color: color, soft: pvMix(color, "white", 0.93), accent: pvMix(color, "black", 0.05) } : PV_NEUTRAL;
       var domain = "";
       try { domain = new URL(/^https?:\/\//i.test(website) ? website : "https://" + website).hostname.replace(/^www\./, ""); } catch (e) {}
+      /* Only the logo the agency's own website declares, and only
+         when it passes the logo-only gate in pvLoads. No Clearbit
+         (a guessed third-party mark), no favicon (a junk mark),
+         no og:image or hero photo — if this fails, the note shows
+         the agency's name in plain text, nothing else. */
       var cands = [];
       if (chk && chk.logoUrl && /^https?:\/\//i.test(chk.logoUrl)) cands.push(chk.logoUrl);
-      if (domain) cands.push("https://logo.clearbit.com/" + domain);
-      if (domain) cands.push("https://www.google.com/s2/favicons?domain=" + encodeURIComponent(domain) + "&sz=128");
       var logoOk = null;
       for (var k = 0; k < cands.length; k++){ if (await pvLoads(cands[k])) { logoOk = cands[k]; break; } if (token !== pvToken) return; }
       if (logoOk){
@@ -5184,21 +5203,20 @@ function moveLeaders(){
    graded agency IS Home Instead, because then it is discovered from
    Home Instead's own domain, exactly like everyone else's.
 
-   FIRST SOURCE: the proxy's own branding fields. The website check
-   (action=fetch) now returns logoUrl and brandColor for the graded
-   agency's site, and both are PREFERRED whenever they are non-null:
-   logoUrl is the logo URL the site itself declares, tried before
-   every discovery candidate below — but it is only ever "the URL
-   the site declares", never an image assumed to load (BrightStar's
-   sits behind Cloudflare and 403s server-side while loading fine
-   in a browser), so it is verified by loading it, and any failure
-   falls back to the discovery chain. brandColor is the real brand
-   colour from the site's stylesheet and wins over the cached
-   colours and over any pixel-derived colour (New Day: #362d71, not
-   the cached teal); when it is null, the colour is derived from
-   the logo's pixels exactly as before. White is never a brand
-   colour: a white brandColor is discarded here just as the proxy
-   excludes a white theme-color upstream.
+   The proxy's branding fields: the website check (action=fetch)
+   returns logoUrl and brandColor for the graded agency's site.
+   brandColor is the real brand colour from the site's stylesheet
+   and wins over the cached colours and over any pixel-derived
+   colour (New Day: #362d71, not the cached teal); when it is null,
+   the colour is derived from the logo's pixels exactly as before.
+   White is never a brand colour: a white brandColor is discarded
+   here just as the proxy excludes a white theme-color upstream.
+   logoUrl is treated with suspicion, NOT preferred: the proxy's
+   "declared logo" is for some sites the og:image — a hero
+   photograph — so it is never rendered unverified and is admitted
+   as a candidate only when it passes the LOGO-ONLY GATE below
+   (URL names a logo, loaded file is not photograph-sized), behind
+   the logo read from the agency's own website HTML.
 
    Otherwise the branding is DISCOVERED AT RUNTIME for whatever
    agency was graded — there is no registry of agencies. When a
@@ -5206,11 +5224,14 @@ function moveLeaders(){
      1. resolves the agency's domain from the website on its Google
         listing (the franchise domain hints below are used only when
         the listing carries no website at all);
-     2. tries the logo service (Clearbit Logo) for that domain, then
-        the site's favicon (Google's favicon service, then the site's
-        own /favicon.ico, then DuckDuckGo's icon service), and only
-        if every one of those fails does the header fall back to the
-        agency's name in plain text;
+     2. reads the agency's REAL logo from the agency's OWN website —
+        the header logo in the site's HTML (see websiteLogoUrl and
+        the LOGO-ONLY GATE at loadNoteLogo). The proxy's declared
+        logoUrl is admitted only when it passes the same gate (its
+        URL names a logo and the loaded file is not a photograph).
+        Clearbit, favicons and every other third-party or guessed
+        mark are NOT used. If the website yields no real logo, the
+        header is the agency's name in plain text, nothing else;
      3. reads the winning logo's pixels to derive the note's brand
         colour, soft tint and accent — where the pixels cannot be
         read from the logo's own host, one more read is attempted
@@ -5548,12 +5569,49 @@ function paletteFromImage(img){
     };
   } catch (e) { return null; }
 }
+/* ---------- LOGO-ONLY GATE (Sam, Nov 24) ----------
+   The weekly note shows the agency's REAL logo, taken from the
+   agency's own website — or the agency's name in plain text, nothing
+   else. Never a photo: no older adult, client or caregiver picture,
+   no hero image, no og:image / social-share image, no photograph of
+   any kind. Never a favicon, never a third-party logo-service mark,
+   never a guessed mark. Every candidate from every source (the
+   proxy's declared URL included) must pass BOTH checks below before
+   it can render; anything that fails is treated as "no logo found"
+   and the note falls back to the plain-text name. */
+/* URL-shape check: the address itself must look like a logo file and
+   must not look like a photograph or share image. A candidate whose
+   URL carries no logo signal at all is not trusted as a logo. */
+function logoUrlShapeOk(rawUrl){
+  var u = "";
+  try { u = decodeURIComponent(String(rawUrl || "")).toLowerCase(); } catch (e) { u = String(rawUrl || "").toLowerCase(); }
+  if (!u) return false;
+  if (/data:image\/svg/.test(u)) return true;
+  if (/og[-_]?image|open[-_]?graph|social[-_]?share|share[-_]?image|twitter[-_]?image|hero|banner|cover[-_]?photo|photo|photograph|caregiver|elderly|senior[-_]?living|people|portrait|headshot|stock|slide|gallery/.test(u)) return false;
+  if (/favicon|\/icon[-_.]|\/icons\/|apple-touch-icon|clearbit|google\.com\/s2|duckduckgo\.com\/ip3/.test(u)) return false;
+  if (/logo|brand[-_]?mark|wordmark/.test(u)) return true;
+  if (/\.svg(\?|#|$)/.test(u)) return true;
+  return false;
+}
+/* Loaded-image check: a photograph gives itself away by its size.
+   Real logo files are modest; a raster at photo dimensions (a hero
+   shot is typically 1200px+ wide and 600px+ tall — Home Instead's
+   og:image is 2880x1652) is rejected no matter where it came from.
+   SVG is vector artwork, never a photograph, so it is exempt. */
+function logoImageSizeOk(img, url){
+  if (/\.svg(\?|#|$)/i.test(url) || String(url).indexOf("data:image/svg") === 0) return true;
+  var w = img.naturalWidth || 0, h = img.naturalHeight || 0;
+  if (!w || !h) return true;
+  if (w >= 900 && h >= 550) return false;
+  if (w * h >= 900000 && h >= 420) return false;
+  return true;
+}
 /* Try one logo URL. With cors=true the load asks for CORS access so
    the pixels can be read for the palette; if that load is refused,
    the same URL is retried without CORS (display only) before giving
    up — a logo that exists is never skipped just because its pixels
-   cannot be read. minSize rejects placeholder responses (Google's
-   favicon service answers unknown domains with a 16px default). */
+   cannot be read. minSize rejects placeholder responses, and
+   logoImageSizeOk rejects photographs outright. */
 function loadNoteLogo(url, cors, minSize, done){
   var finished = false;
   function attempt(useCors){
@@ -5575,6 +5633,7 @@ function loadNoteLogo(url, cors, minSize, done){
          keep the floor, which is what rejects placeholder favicons. */
       var isSvg = /\.svg(\?|#|$)/i.test(url) || url.indexOf("data:image/svg") === 0;
       if ((!img.naturalWidth && !isSvg) || (img.naturalWidth && img.naturalWidth < minSize)){ fail(); return; }
+      if (!logoImageSizeOk(img, url)){ fail(); return; } /* photograph-sized: never a logo */
       finished = true;
       done({ url: url, img: img, readable: !!useCors });
     };
@@ -5637,6 +5696,9 @@ function logoFromHtml(html, baseUrl){
     if (!src || src.indexOf("data:") === 0) return "";
     var w = parseInt(img.getAttribute("width") || "", 10), h = parseInt(img.getAttribute("height") || "", 10);
     if (w && h && (w < 24 || h < 12)) return ""; /* declared tiny: a spacer or a tracking pixel, not a logo */
+    if (w >= 900 && h >= 400) return ""; /* declared photo-sized: a hero or banner photograph, not a logo */
+    var probe = (src + " " + (img.getAttribute("class") || "") + " " + (img.getAttribute("alt") || "")).toLowerCase();
+    if (/hero|banner|photo|photograph|caregiver|elderly|portrait|headshot|stock|slide|gallery|og[-_]?image|social[-_]?share/.test(probe)) return "";
     return abs(src);
   }
   var scopes = [];
@@ -5652,19 +5714,33 @@ function logoFromHtml(html, baseUrl){
       var tag = ((imgs[i].getAttribute("class") || "") + " " + (imgs[i].getAttribute("alt") || "") + " " + (imgs[i].getAttribute("src") || "")).toLowerCase();
       if (tag.indexOf("logo") > -1){ u = imgUrl(imgs[i]); if (u) return u; }
     }
-    /* 2 — the first real image in the header: on an agency site that
-       is the logo. (Header scope only; the whole-document scope is
-       too broad for this rule.) */
+    /* 2 — the image inside the header's home/brand link: the link
+       back to the site's home page is where a site puts its own
+       logo, so an image there is the logo even when the file is not
+       named "logo". An unlabelled image floating elsewhere in the
+       header is NOT taken: in a hero-style header that first image
+       is a photograph of people, which is exactly what must never
+       ship as a logo. */
     if (scope !== doc){
-      for (i = 0; i < imgs.length; i++){ u = imgUrl(imgs[i]); if (u) return u; }
-      /* 3 — an inline SVG logo in the header, serialised so it can
-         render as the note's logo image. */
-      var svg = scope.querySelector("svg");
-      if (svg){
-        try {
-          var ser = new XMLSerializer().serializeToString(svg);
-          if (ser && ser.length > 80) return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(ser);
-        } catch (e) {}
+      var homeLinks = scope.querySelectorAll("a");
+      for (i = 0; i < homeLinks.length; i++){
+        var href = (homeLinks[i].getAttribute("href") || "").trim();
+        var linkTag = ((homeLinks[i].getAttribute("class") || "") + " " + (homeLinks[i].getAttribute("aria-label") || "") + " " + (homeLinks[i].getAttribute("rel") || "")).toLowerCase();
+        var isHome = href === "/" || href === "./" || href === "#" || /^\/(index\.(html?|php))?$/.test(href) || linkTag.indexOf("logo") > -1 || linkTag.indexOf("brand") > -1;
+        if (!isHome) continue;
+        var limg = homeLinks[i].querySelector("img");
+        if (limg){ u = imgUrl(limg); if (u) return u; }
+        /* 3 — an inline SVG inside that same home/brand link,
+           serialised so it can render as the note's logo image.
+           (The header's first stray SVG is NOT taken: that is
+           usually a menu or search icon, a guessed mark.) */
+        var lsvg = homeLinks[i].querySelector("svg");
+        if (lsvg){
+          try {
+            var ser = new XMLSerializer().serializeToString(lsvg);
+            if (ser && ser.length > 80) return "data:image/svg+xml;charset=utf-8," + encodeURIComponent(ser);
+          } catch (e) {}
+        }
       }
     }
   }
@@ -5767,32 +5843,29 @@ function discoverNoteBrand(key, agency){
       });
     })(0);
   }
-  /* The proxy's declared logo URL goes FIRST. It is verified by
-     loading it, exactly like every other candidate: a load failure
-     (or a render-time failure later, see noteLogoFailed) falls
-     through to the chain below. It is never assumed to load. */
+  /* LOGO-ONLY CHAIN (Sam, Nov 24): the ONLY runtime source is the
+     agency's own website — the header logo read straight from its
+     HTML, header/footer fragments included (see websiteLogoUrl).
+     There are deliberately NO other candidates:
+       - the proxy's declared logoUrl is NOT used as an image: for
+         some sites it is the og:image, a hero PHOTOGRAPH (Home
+         Instead: 2880x1652), and it used to win and ship as the
+         "logo". It is admitted only when its URL itself names a
+         logo (logoUrlShapeOk) AND the loaded file is not
+         photograph-sized (logoImageSizeOk, in loadNoteLogo);
+       - Clearbit's logo service is a third-party guessed mark —
+         removed;
+       - favicons (Google's service, /favicon.ico, DuckDuckGo's)
+         are junk marks, not the agency's logo — removed.
+     If the website yields no real logo, resolveTextOnly shows the
+     agency's name in plain text, nothing else. */
   var proxyCands = [];
-  if (pf && pf.logoUrl) proxyCands.push({ url: pf.logoUrl, cors: true, min: 24, fav: false, fromProxy: true });
-  var faviconCands = [];
-  if (gatedDomain){
-    faviconCands.push({ url: "https://logo.clearbit.com/" + gatedDomain, cors: true, min: 24, fav: false });
-    faviconCands.push({ url: "https://www.google.com/s2/favicons?domain=" + encodeURIComponent(gatedDomain) + "&sz=128", cors: false, min: 64, fav: true });
-    faviconCands.push({ url: "https://" + gatedDomain + "/favicon.ico", cors: false, min: 48, fav: true });
-    faviconCands.push({ url: "https://icons.duckduckgo.com/ip3/" + gatedDomain + ".ico", cors: false, min: 48, fav: true });
-  }
-  walk(proxyCands, function(){
+  if (pf && pf.logoUrl && logoUrlShapeOk(pf.logoUrl)) proxyCands.push({ url: pf.logoUrl, cors: true, min: 24, fav: false, fromProxy: true });
+  if (!gatedDomain){ walk(proxyCands, resolveTextOnly); return; }
+  websiteLogoUrl(gatedDomain).then(function(found){
     if ((noteBrandGen[key] || 0) !== gen) return;
-    if (!gatedDomain){ walk(faviconCands, resolveTextOnly); return; }
-    /* SECOND: the agency's own website HTML — the header logo read
-       straight from the site, header/footer fragments included
-       (see websiteLogoUrl). Ahead of Clearbit and the favicon
-       services: a logo that is on the website must be found there,
-       not approximated by a favicon. */
-    websiteLogoUrl(gatedDomain).then(function(found){
-      if ((noteBrandGen[key] || 0) !== gen) return;
-      var siteCands = found ? [{ url: found, cors: true, min: 24, fav: false, fromSite: true }] : [];
-      walk(siteCands, function(){ walk(faviconCands, resolveTextOnly); });
-    });
+    var siteCands = found ? [{ url: found, cors: true, min: 24, fav: false, fromSite: true }] : [];
+    walk(siteCands, function(){ walk(proxyCands, resolveTextOnly); });
   });
 }
 /* The same logo, read through an image proxy that serves CORS
@@ -5830,37 +5903,25 @@ function finishNoteBrand(key, agency, domain, cand, res, gen){
   /* The logo displays, but its pixels cannot be read from its own
      host (the proxy's BrightStar logo is exactly this case: it loads
      in a browser, its pixels stay unreadable cross-origin). The
-     colours are then derived from a CORS-readable re-read — the
-     logo itself through an image proxy first, the site's favicon
-     through the same proxy as the fallback. If neither read works,
-     the note keeps the real logo on the neutral palette — or on the
+     colours are then derived from a CORS-readable re-read of the
+     logo itself through an image proxy. If that read fails, the
+     note keeps the real logo on the neutral palette — or on the
      proxy's brandColor, when the proxy supplied one. */
   if (!domain){ apply(null); return; }
-  /* First, the logo's OWN pixels, read through the image proxy:
-     the palette — and the white-artwork flag that puts a
-     white-on-transparent logo on a dark chip — then come from the
-     logo itself. The favicon read below cannot do that job: VSM
-     Care's header logo is the white variant (made for the site's
-     navy header, and its host sends no CORS headers), while its
-     favicon is the coloured mark on navy — a favicon-derived
-     palette would never flag the white artwork, and the logo
-     would render near-invisible on the white note. Only when the
-     logo's own pixels cannot be read either does the favicon
-     read stand, exactly as before. */
-  var favProxyUrl = "https://images.weserv.nl/?url=ssl:www.google.com/s2/favicons%3Fdomain%3D" + encodeURIComponent(domain) + "%26sz%3D128";
-  function faviconPalette(){
-    loadNoteLogo(favProxyUrl, true, 24, function(px){
-      apply(px ? paletteFromImage(px.img) : null);
-    });
-  }
+  /* The palette comes from the logo's OWN pixels, read through the
+     image proxy — never from a favicon: a favicon is not the logo,
+     and its colours must not stand in for the logo's (VSM Care's
+     favicon is the coloured mark on navy while its real header
+     logo is the white variant; a favicon-derived palette would
+     never flag the white artwork). If the logo's own pixels cannot
+     be read either, the note keeps the real logo on the neutral
+     palette, or on the proxy's brandColor when one was supplied. */
   var logoProxyUrl = weservReadUrl(res.url);
   if (logoProxyUrl){
     loadNoteLogo(logoProxyUrl, true, 24, function(lp){
-      var pal = lp ? paletteFromImage(lp.img) : null;
-      if (pal) apply(pal);
-      else faviconPalette();
+      apply(lp ? paletteFromImage(lp.img) : null);
     });
-  } else faviconPalette();
+  } else apply(null);
 }
 /* After discovery resolves, rebuild the note with the real brand and
    swap it into the page — but only if the report on screen is still
@@ -5883,12 +5944,10 @@ function swapInNote(key){
 }
 /* If a logo URL fails when the note itself renders (it was verified
    during discovery, so this is only a safety net), fall back rather
-   than show a broken-image box. A failed PROXY logoUrl falls back to
-   the runtime discovery chain (Clearbit, then the favicon services,
-   then the plain-text name): the declared URL is dropped for this
-   report, the name shows meanwhile, and discovery swaps a chain
-   logo in if one loads. Any other failed logo falls back to the
-   agency's name in place. */
+   than show a broken-image box. A failed PROXY logoUrl is dropped
+   for this report and discovery re-runs: the agency's own website
+   logo if one is found there, otherwise the plain-text name. Any
+   other failed logo falls back to the agency's name in place. */
 function noteLogoFailed(img){
   var agency = img.getAttribute("data-agency") || "";
   var wasProxy = img.getAttribute("data-proxy") === "1";
@@ -5930,15 +5989,17 @@ function weeklyNoteHTML(){
   if (noteStore[key]) return noteStore[key];
   var brand = noteBrandResolved[key] || effectiveCachedBrand(agency, key) || null;
   if (!brand){
-    /* No resolved or cached brand yet, but the proxy already supplied
-       branding for this report: render it now — the proxy's logo
-       itself, in the proxy's colour — instead of the agency's name
-       sitting in grey like a finished logo while discovery runs
-       (not final — discovery still runs for the logo, proxy logo
-       first, and swaps the finished note in when it resolves). */
+    /* No resolved or cached brand yet. The proxy's brandColor may
+       already be known and can colour the note's text, but the
+       proxy's logoUrl is NEVER rendered unverified: for some sites
+       it is an og:image hero photograph, and rendering it here is
+       exactly how a photo shipped as a "logo". The header shows
+       the loading state until discovery verifies a real logo from
+       the agency's own website (or resolves to the plain-text
+       name). */
     var pf0 = proxyNoteFields[key] || null;
     var pal0 = pf0 && pf0.brandColor ? paletteFromHex(pf0.brandColor) : null;
-    if (pf0 && (pal0 || pf0.logoUrl)) brand = { logo: pf0.logoUrl || null, logoAlt: agency + " logo", fav: false, fromProxy: !!pf0.logoUrl, color: pal0 ? pal0.color : NOTE_NEUTRAL.color, soft: pal0 ? pal0.soft : NOTE_NEUTRAL.soft, accent: pal0 ? pal0.accent : NOTE_NEUTRAL.accent };
+    if (pal0) brand = { logo: null, logoAlt: "", fav: false, color: pal0.color, soft: pal0.soft, accent: pal0.accent };
   }
   var isFinal = !!noteBrandResolved[key] || !!effectiveCachedBrand(agency, key);
   if (!brand) brand = NOTE_NEUTRAL;
