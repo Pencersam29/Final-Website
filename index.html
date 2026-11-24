@@ -4560,7 +4560,23 @@ function modelService(service, reviewsOverride){
   if (!comp) return { service: service, modelled: false, reason: "position not modelled — no comparable in the returned list for this search" };
   var estPos = comp.pos;
   var enq = enquiriesForPos(estPos);
-  return { service: service, modelled: true, comp: comp, estPos: estPos, enq: enq, dollars: enq * ECON.perEnquiryMonth, placesCount: places.length, query: entry.query || "" };
+  /* ONE MISSED SERVICE, ABOUT 2 ENQUIRIES (Sam, Nov 24 —
+     Comprehensive Home Care, Milwaukee): the raw model priced
+     naming 24-hour care at the comparable's FULL position value —
+     7.7 enquiries a month, $1,752/mo — as if every enquiry that
+     position receives in the “24-hour care” search were new
+     business the fix creates. It is not: that search is one narrow
+     slice of the market, and a single missed-service fix — naming
+     one service the page never mentions — is worth about 2
+     enquiries a month. The PRICED gain (incEnq, and the dollars
+     built on it) is therefore capped at 2 enquiries a month,
+     exactly like the one-fix-one-enquiry cap on the staged
+     relevance steps. enq itself stays the comparable position's
+     full modelled enquiries: Stage 2's post-fix bases and the
+     rating scenario read it as a position, not a gain, and the
+     pack-entry maths built on those bases is unchanged. */
+  var incEnq = Math.min(enq, 2);
+  return { service: service, modelled: true, comp: comp, estPos: estPos, enq: enq, incEnq: incEnq, dollars: incEnq * ECON.perEnquiryMonth, placesCount: places.length, query: entry.query || "" };
 }
 function modelCoreAtReviews(reviewsOverride){
   var m0 = dollarModel();
@@ -4758,6 +4774,21 @@ function buildDollarModel(){
         var upCurEff = effectiveEnq(m.pos, m.agencyReviews);
         if (upNewEff !== null && upCurEff !== null){ upEnq = upNewEff - upCurEff; if (upEnq < 0) upEnq = 0; }
         else { upEnq = enquiriesForPos(upTo) - enquiriesForPos(m.pos); if (upEnq < 0) upEnq = 0; }
+      }
+      /* ONE CORE FIGURE (Sam, Nov 24 recalibration): the upModel
+         carries the CORE part of the same judged total Problem 1
+         prints (judgedReviewQueries — in-pack cap included), not
+         the uncapped core-only trust difference computed above.
+         The Stage 2 reconciliation then adds the service-search
+         remainder on top of it, so Stage 1 + Stage 2, the merged
+         cost row, Problem 1 and the share block all carry the one
+         recalibrated total — for Cornerstone, 3 enquiries a
+         month — never the core part at one scale and the total
+         at another. */
+      var jrUp = (typeof judgedReviewQueries === "function") ? judgedReviewQueries(m.agencyReviews + 20) : null;
+      if (jrUp && jrUp.queries && jrUp.queries.length){
+        var cqUp = jrUp.queries.filter(function(q){ return q.label === "core"; })[0] || jrUp.queries[0];
+        if (cqUp && typeof cqUp.toPos === "number"){ upTo = cqUp.toPos; upEnq = Math.max(0, cqUp.incEnq); }
       }
     }
     m.upModel = { incEnq: upEnq, dollars: upEnq * ECON.perEnquiryMonth, toPos: upTo, gainPct: Math.round(((shareForPos(upTo) || ECON.packShare[0])/ECON.packShare[m.pos-1]-1)*100) };
@@ -6138,6 +6169,31 @@ function judgedReviewQueries(target){
     queries.forEach(function(q){ q.incEnq = q.incEnq * fCapPE; if (q.newEff !== null && q.newEff !== undefined && q.curEff !== null && q.curEff !== undefined) q.newEff = q.curEff + q.incEnq; });
     totalInc = 3.5;
   }
+  /* IN-PACK CAP — RECALIBRATED (Sam, Nov 24, later the same day —
+     Cornerstone Caregiving, Anniston): the trust-adjusted sum
+     above priced Cornerstone's +20 reviews at 19.36 enquiries a
+     month. That is not reachable in a market this size: the same
+     +20 reviews, summed across the core search and every service
+     search at full trust, counted the same small pool of families
+     several times over. Sam's concrete figure for the case — #3
+     to #2 in the pack, 5 reviews to 25, position step and trust
+     gain together — is 3 enquiries a month. So for an agency
+     ALREADY in the pack, the +20-reviews total across all graded
+     searches is capped at 3 enquiries a month, scaled down
+     proportionally per search so the per-query working still
+     sums to the total — the same construction as the pack-entry
+     cap above, at the in-pack value Sam named. An in-pack move
+     cannot be worth more than entering the pack (3.5), and at 3
+     it sits just under it. The pack-entry path for agencies
+     OUTSIDE the pack is untouched: their cap, their Stage 2
+     set-to-3.5 and their verdict output are exactly as before. */
+  var coreQIP = queries.filter(function(q){ return q.label === "core"; })[0] || queries[0];
+  if (coreQIP && totalInc > 3
+      && typeof coreQIP.fromPos === "number" && coreQIP.fromPos >= 1 && coreQIP.fromPos <= 3){
+    var fCapIP = 3 / totalInc;
+    queries.forEach(function(q){ q.incEnq = q.incEnq * fCapIP; if (q.newEff !== null && q.newEff !== undefined && q.curEff !== null && q.curEff !== undefined) q.newEff = q.curEff + q.incEnq; });
+    totalInc = 3;
+  }
   return { queries: queries, totalInc: totalInc };
 }
 function reviewsClientsModel(delta){
@@ -6695,7 +6751,7 @@ function renderDollars(){
   m.serviceModels.forEach(function(sm, si){
     var h = m.serviceIssues[si] ? m.serviceIssues[si].heading : sm.service;
     lines.push({ label: h, amount: sm.modelled ? sm.dollars : null, note: sm.modelled ? "" : "not modelled — no comparable",
-      detail: sm.modelled ? derivLine(sm.enq, sm.dollars) : "" });
+      detail: sm.modelled ? derivLine((sm.incEnq !== null && sm.incEnq !== undefined) ? sm.incEnq : sm.enq, sm.dollars) : "" });
   });
   if (m.positionIssues.length){
     var pim = m.positionIssueModels || [];
