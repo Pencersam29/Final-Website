@@ -4418,6 +4418,33 @@ function enquiriesForPos(pos){
   return s === null ? null : (s/100)*POOL_ENQ;
 }
 function enquiriesForSharePct(pct){ return (pct/100)*POOL_ENQ; }
+/* TRUST (Sam, Nov 24 — Cornerstone Caregiving, Anniston): a position's
+   click share is only what a listing CAN capture. Whether families
+   actually call depends on whether the listing looks proven, and that
+   is the review count. A listing on 5 reviews gets skipped even at #3
+   — there is not enough there to trust — so pricing +20 reviews as the
+   bare share-table delta between two positions (#3→#2 = 0.15 enquiries
+   a month) prices only the move and none of the trust the move is
+   really buying. The reviews gain is therefore priced on EFFECTIVE
+   enquiries: the position's modelled enquiries x a trust factor for
+   the review count at that point. The factor rises with the count on
+   a square-root curve (early reviews change trust fastest) and reaches
+   full capture at 25 reviews — the base Sam named as fixing the trust
+   gap: 5 reviews capture about 45% of a position's enquiries, 17 about
+   82%, 25 and above the full share. An agency already at 25+ reviews
+   has no trust gap, so its reviews gain collapses back to the pure
+   position delta, exactly as it should. The floor keeps a zero-review
+   listing from modelling at literally nothing. */
+function trustFactor(reviews){
+  if (reviews === null || reviews === undefined || isNaN(reviews)) return 1;
+  var n = Math.max(0, Number(reviews));
+  var t = Math.sqrt(Math.min(1, n / 25));
+  return Math.max(0.1, t);
+}
+function effectiveEnq(pos, reviews){
+  var e = enquiriesForPos(pos);
+  return e === null ? null : e * trustFactor(reviews);
+}
 /* Enquiries display at 2-decimal precision. Rounding to whole or even
    1-decimal enquiries before differencing wiped real Stage 2 gains to
    $0 (a 0.21-enquiry gain is $47.78/mo, not $0). Display only — every
@@ -4700,7 +4727,40 @@ function buildDollarModel(){
   // If already in pack, moving to #1 model
   if (inPack && typeof m.pos === "number" && m.pos > 1 && !(m.positionIssueModels && m.positionIssueModels.length)){
     var upEnq = enquiriesForPos(1) - enquiriesForPos(m.pos);
-    m.upModel = { incEnq: upEnq, dollars: upEnq * ECON.perEnquiryMonth, gainPct: Math.round((ECON.packShare[0]/ECON.packShare[m.pos-1]-1)*100) };
+    var upTo = 1;
+    /* JUDGED DESTINATION, NOT AN ASSUMED #1 (Sam, Nov 24 — Cornerstone
+       Caregiving, Anniston: 5 reviews at #3, pack leaders on 94 and 17).
+       When reviews are the issue, the move up is the move +20 reviews
+       actually judges to — there, 25 reviews pass the 17-review #2 but
+       never the 94-review #1, so the judged landing is #2. Pricing the
+       full #3→#1 delta anyway printed $284 / 1.25 enquiries on the
+       share block and the merged dollars row while the Move's own
+       judged figure said otherwise — three numbers for one move.
+       TRUST, SAME DAY: the gain at that judged landing is NOT the bare
+       share-table delta between the two positions. #3 and #2 take
+       almost the same share of the clicks, so the delta priced the
+       move at 0.15 enquiries a month — but a 5-review listing does not
+       capture its position's share today: families skip it for lack of
+       proof. The gain is the EFFECTIVE-enquiries difference (see
+       trustFactor): destination share at full 25-review trust minus
+       today's share discounted by today's 5-review trust. upModel
+       carries that figure and the judged destination (toPos), and it
+       is computed with the same formula judgedReviewQueries uses for
+       the core search, so the Move, this Stage 1 value and the share
+       block can never carry two versions of the core gain. With no
+       reviews issue there is no +20 judgement to read, so the move
+       stays valued to #1 on raw shares as before. */
+    if (m.hasReviewsIssue && m.agencyReviews !== null && m.agencyReviews !== undefined){
+      var jUp = judgedPosition(corePlacesList(), m.agencyReviews + 20, m.agencyRatingVal, m.pos);
+      if (jUp && jUp.modelled && typeof jUp.judgedPos === "number"){
+        upTo = jUp.judgedPos;
+        var upNewEff = effectiveEnq(upTo, m.agencyReviews + 20);
+        var upCurEff = effectiveEnq(m.pos, m.agencyReviews);
+        if (upNewEff !== null && upCurEff !== null){ upEnq = upNewEff - upCurEff; if (upEnq < 0) upEnq = 0; }
+        else { upEnq = enquiriesForPos(upTo) - enquiriesForPos(m.pos); if (upEnq < 0) upEnq = 0; }
+      }
+    }
+    m.upModel = { incEnq: upEnq, dollars: upEnq * ECON.perEnquiryMonth, toPos: upTo, gainPct: Math.round(((shareForPos(upTo) || ECON.packShare[0])/ECON.packShare[m.pos-1]-1)*100) };
   } else { m.upModel = null; }
   // Headline total: sum of modelled Stage 1 incremental dollars.
   // An agency already in the pack has no positionModel — its Stage 1
@@ -4859,6 +4919,71 @@ function buildDollarModel(){
           pp.ceilingTrimEnq = Math.max(0, pp.standaloneIncEnq - pp.incEnq);
           pp.ceilingTrimDollars = pp.ceilingTrimEnq * ECON.perEnquiryMonth;
         });
+        row.totalIncEnq = 0; row.totalDollars = 0; row.ceilingTrimEnq = 0;
+        row.parts.forEach(function(pp){
+          if (!pp.modelled) return;
+          row.totalIncEnq += pp.incEnq;
+          row.totalDollars += pp.dollars;
+          row.ceilingTrimEnq += pp.ceilingTrimEnq;
+        });
+        row.anyChange = row.totalIncEnq > 0.001;
+      }
+      /* IN-PACK RECONCILIATION (Sam, Nov 24 — Cornerstone): for an
+         agency already in the pack whose issue is reviews, with no
+         Stage 1 position or service model competing for the same
+         searches, the reviews gain is ONE number — the trust-adjusted
+         standalone total from judgedReviewQueries (jr.totalInc), the
+         same figure Problem 1 prints. Its core-search part already
+         sits in Stage 1 as the upModel, so this row must carry the
+         REST of the total — no more, no less. The generic on-top
+         pricing above cannot guarantee that: it zeroes the core part
+         against a #1 post-fix base and trims service parts at a
+         nominal #1 ceiling, while the standalone gains are differenced
+         on trust-discounted enquiries. So the parts are reconciled
+         here: the core part carries 0 when the upModel holds the core
+         gain (or the core gain itself when there is no upModel, e.g.
+         at #1, where the gain is trust alone), and the service parts
+         are scaled proportionally to the remaining total, so the
+         per-search working still sums to the row. Stage 1 + this row
+         then equals jr.totalInc exactly, the merged cost row reads
+         the same total, and the headline is that total — one number
+         in Problem 1, the cost row and the share block. */
+      var inPackRec = typeof m.pos === "number" && m.pos >= 1 && m.pos <= 3;
+      var noCompetingRec = !m.positionModel && !(m.serviceModels || []).some(function(sm){ return sm.modelled; });
+      if (inPackRec && m.hasReviewsIssue && noCompetingRec && row.anyModelled){
+        var coreGainRec = 0;
+        jr.queries.forEach(function(q){ if (q.label === "core") coreGainRec = Math.max(0, q.incEnq); });
+        var corePartRec = row.parts.filter(function(pp){ return pp.type === "core" && pp.modelled; })[0] || null;
+        var wantCoreRec = m.upModel ? 0 : coreGainRec;
+        var wantSvcRec = Math.max(0, jr.totalInc - coreGainRec);
+        if (corePartRec && Math.abs(corePartRec.incEnq - wantCoreRec) > 0.001){
+          corePartRec.incEnq = wantCoreRec;
+          corePartRec.dollars = wantCoreRec * ECON.perEnquiryMonth;
+          corePartRec.enq = corePartRec.baseEnq + wantCoreRec;
+          corePartRec.ceilingTrimEnq = Math.max(0, corePartRec.standaloneIncEnq - wantCoreRec);
+          corePartRec.ceilingTrimDollars = corePartRec.ceilingTrimEnq * ECON.perEnquiryMonth;
+        }
+        var svcPartsRec = row.parts.filter(function(pp){ return pp.type !== "core" && pp.modelled; });
+        var svcSumRec = svcPartsRec.reduce(function(s, pp){ return s + pp.incEnq; }, 0);
+        if (svcPartsRec.length && Math.abs(svcSumRec - wantSvcRec) > 0.001){
+          if (svcSumRec > 0.001){
+            var fRec = wantSvcRec / svcSumRec;
+            svcPartsRec.forEach(function(pp){
+              pp.incEnq = pp.incEnq * fRec;
+              pp.dollars = pp.incEnq * ECON.perEnquiryMonth;
+              pp.enq = pp.baseEnq + pp.incEnq;
+              pp.ceilingTrimEnq = Math.max(0, pp.standaloneIncEnq - pp.incEnq);
+              pp.ceilingTrimDollars = pp.ceilingTrimEnq * ECON.perEnquiryMonth;
+            });
+          } else if (wantSvcRec > 0.001){
+            var firstRec = svcPartsRec[0];
+            firstRec.incEnq = wantSvcRec;
+            firstRec.dollars = wantSvcRec * ECON.perEnquiryMonth;
+            firstRec.enq = firstRec.baseEnq + wantSvcRec;
+            firstRec.ceilingTrimEnq = Math.max(0, firstRec.standaloneIncEnq - wantSvcRec);
+            firstRec.ceilingTrimDollars = firstRec.ceilingTrimEnq * ECON.perEnquiryMonth;
+          }
+        }
         row.totalIncEnq = 0; row.totalDollars = 0; row.ceilingTrimEnq = 0;
         row.parts.forEach(function(pp){
           if (!pp.modelled) return;
@@ -5872,7 +5997,11 @@ function clientsPhrase(clientsPerMonth, enquiriesPerMonth){
    (judgedPosition, floored at its current position in that list),
    differences the enquiries per query against where it sits in that
    list today, and sums the gains: total extra enquiries × the 25%
-   close rate = new clients a month. The per-query working is kept on
+   close rate = new clients a month. The differencing is on EFFECTIVE
+   enquiries (Sam, Nov 24 — see trustFactor): each side of the
+   difference is discounted by the trust its review count earns, so a
+   thin-based agency's gain includes the families who stop skipping
+   it, not just the position step. The per-query working is kept on
    the returned object (queries) so the figure can be shown, not just
    asserted. */
 function judgedReviewQueries(target){
@@ -5894,8 +6023,19 @@ function judgedReviewQueries(target){
     if (!places.length || curEnq === null || curEnq === undefined) return;
     var j = judgedPosition(places, target, m0.agencyRatingVal, (typeof myPos === "number") ? myPos : null);
     if (!j.modelled) return;
-    var inc = j.enq - curEnq; if (inc < 0) inc = 0;
-    queries.push({ label: label, query: queryLabel || "", fromPos: (typeof myPos === "number") ? myPos : null, toPos: j.judgedPos, curEnq: curEnq, newEnq: j.enq, incEnq: inc });
+    /* TRUST-ADJUSTED GAIN (Sam, Nov 24): the gain on this search is the
+       EFFECTIVE-enquiries difference — the judged destination's share
+       at the new total's trust minus today's share at today's trust
+       (see trustFactor). The destination is the realistic judged rank
+       for this search's own list, never an assumed #1: for Cornerstone
+       that is #2, past the 17-review listing, never the 94-review #1.
+       curEnq / newEnq stay the NOMINAL position enquiries (Stage 2's
+       post-fix bases read them); curEff / newEff carry the trust-
+       discounted pair the gain is actually differenced from. */
+    var curEff = curEnq * trustFactor(m0.agencyReviews);
+    var newEff = j.enq * trustFactor(target);
+    var inc = newEff - curEff; if (inc < 0) inc = 0;
+    queries.push({ label: label, query: queryLabel || "", fromPos: (typeof myPos === "number") ? myPos : null, toPos: j.judgedPos, curEnq: curEnq, newEnq: j.enq, curEff: curEff, newEff: newEff, incEnq: inc });
   }
   /* Core query — current position is the report's own pack position. */
   var coreCurEnq = null;
@@ -5938,10 +6078,35 @@ function judgedReviewQueries(target){
     if (!judgedD.modelled) return null;
     var baseD = myPosD ? enquiriesForPos(myPosD) : enquiriesForPos("outside");
     if (baseD === null || baseD === undefined) return null;
-    var incD = judgedD.enq - baseD; if (incD < 0) incD = 0;
+    /* Same trust-adjusted difference as judgeQuery above. */
+    var curEffD = baseD * trustFactor(m0.agencyReviews);
+    var newEffD = judgedD.enq * trustFactor(target);
+    var incD = newEffD - curEffD; if (incD < 0) incD = 0;
     totalInc = incD;
-    queries = [{ label: "core", query: ownerCtx.keyword || "home care", fromPos: myPosD, toPos: judgedD.judgedPos, curEnq: baseD, newEnq: judgedD.enq, incEnq: incD }];
+    queries = [{ label: "core", query: ownerCtx.keyword || "home care", fromPos: myPosD, toPos: judgedD.judgedPos, curEnq: baseD, newEnq: judgedD.enq, curEff: curEffD, newEff: newEffD, incEnq: incD }];
   }
+  /* ONE TOTAL, EVERY SEARCH, TRUST INCLUDED (Sam, Nov 24 —
+     Cornerstone Caregiving, Anniston; this supersedes the same-day
+     core-only restriction). The reviews gain is valued PER SEARCH —
+     each graded list separately, at that search's realistic judged
+     destination — and the per-search gains ADD, the way this model
+     has always summed them. What changed is what a per-search gain
+     IS: not the bare click-share delta between two positions, but
+     the trust-adjusted effective-enquiries difference (judgeQuery
+     above). Cornerstone sits #3 on 5 reviews: the #3→#2 share delta
+     alone is 0.15 enquiries a month, which prices the position step
+     and ignores that a 5-review listing is skipped even at #3. At 25
+     reviews the listing both lands at #2 AND captures that position's
+     full share — the trust gap is the bigger half of the gain, on the
+     core search and on every service search where the same thin base
+     is being skipped today. This summed total is THE reviews number:
+     reviewsClientsModel reads it for Problem 1, Stage 2 reconciles
+     its row to it for the cost row and the headline, and the share
+     block reads it too — one figure, three places, never three
+     figures again. The pack-entry cap below still binds agencies
+     OUTSIDE the pack today, exactly as before; an agency already in
+     the pack is not entering anything, so no entry cap applies to
+     its within-pack move. */
   /* PACK-ENTRY CAP, STANDALONE (Sam, Nov 19 — iCare Homecare,
      Grand Rapids): the same +20 reviews are ONE move in ONE
      market. Summing the full share-table gain across the core
@@ -5970,7 +6135,7 @@ function judgedReviewQueries(target){
   if (coreQPE && totalInc > 3.5
       && !(typeof coreQPE.fromPos === "number" && coreQPE.fromPos >= 1 && coreQPE.fromPos <= 3)){
     var fCapPE = 3.5 / totalInc;
-    queries.forEach(function(q){ q.incEnq = q.incEnq * fCapPE; q.newEnq = q.curEnq + q.incEnq; });
+    queries.forEach(function(q){ q.incEnq = q.incEnq * fCapPE; if (q.newEff !== null && q.newEff !== undefined && q.curEff !== null && q.curEff !== undefined) q.newEff = q.curEff + q.incEnq; });
     totalInc = 3.5;
   }
   return { queries: queries, totalInc: totalInc };
@@ -6148,6 +6313,14 @@ function reviewsProblemHTML(m, idx){
   if (leaders.length){
     counts = "You have <b>" + m.agencyReviews + " reviews</b>" + (rating ? " at <b>" + esc(String(rating)) + " stars</b>" : "") + ". The pack leaders have " + leaders.map(function(l){ return "<b>" + l.reviews + " reviews</b> (" + esc(l.name) + (l.rating ? ", " + esc(String(l.rating)) + " stars" : "") + ")"; }).join(", ") + ".";
   }
+  /* The trust gap, stated plainly (Sam, Nov 24): a thin base is not
+     just a ranking problem — families skip the listing even when it
+     ranks, because there is not enough proof to trust it. That is
+     why the figure below prices trust as well as position. Only
+     claimed while the base is actually thin (under 25 reviews). */
+  if (m.agencyReviews !== null && m.agencyReviews !== undefined && Number(m.agencyReviews) < 25){
+    counts += " With a base that thin, families skip your listing even when it ranks — there is not enough proof there to trust it yet. At 25 reviews, that proof is there.";
+  }
   var posForSit = effectivePackPos();
   if (posForSit === null || posForSit === undefined) posForSit = (typeof m.pos === "number" ? m.pos : (m.pos === "outside" ? 99 : null));
   var sitB = isReviewsStrongOutside(m.agencyReviews, m.packCounts, posForSit);
@@ -6173,11 +6346,20 @@ function reviewsProblemHTML(m, idx){
      drag, and only higher-rated reviews move it. */
   var leaderRatings = leaders.map(function(l){ return (l.rating === null || l.rating === undefined || l.rating === "—") ? null : parseFloat(l.rating); }).filter(function(n){ return n !== null && !isNaN(n); });
   var ratingGapCase = !!(outReviewsPack && rating && leaderRatings.length >= 2 && leaderRatings.every(function(n){ return n >= parseFloat(rating) + 0.3; }));
+  /* The clients model is computed BEFORE the red line because the red
+     line's claim depends on its judged landing (Sam, Nov 24): “jump to
+     number one” may only be printed when +20 reviews actually judge
+     to #1. Cornerstone Anniston judges to #2 — 25 reviews pass the
+     17-review #2, never the 94-review #1 — so its line says move up,
+     not number one. */
+  var cm = reviewsClientsModel(20);
   if (ratingGapCase){
     var lrSorted = leaderRatings.slice().sort(function(x, y){ return x - y; });
     redLine = "Your reviews aren't too few — they're too low: " + m.agencyReviews + " reviews at " + parseFloat(rating).toFixed(1) + " stars, against " + lrSorted[0].toFixed(1) + "–" + lrSorted[lrSorted.length - 1].toFixed(1) + " stars in the pack. You have the deepest review base here; the average is what's holding you back.";
   } else if (inPackNow || outReviewsPack){
-    redLine = "You need more Google reviews to jump to number one in your local ranking \u2014 get new reviews and you'll go higher.";
+    redLine = (cm && cm.mv && typeof cm.mv.judgedPos === "number" && cm.mv.judgedPos > 1)
+      ? "You need more Google reviews to move up in your local ranking \u2014 get new reviews and you'll go higher."
+      : "You need more Google reviews to jump to number one in your local ranking \u2014 get new reviews and you'll go higher.";
   } else if (sitB){
     redLine = personalizedReviewsLine(m) || "Due to the other issues, you'll need more Google reviews to land in the top 3 map pack.";
   } else if (m.agencyReviews !== null && m.agencyReviews !== undefined && m.agencyReviews < 20) {
@@ -6192,7 +6374,6 @@ function reviewsProblemHTML(m, idx){
       ? "Your Google reviews are leading to bad search results against " + leaderCounts.join(" and ") + " in the pack."
       : "Your Google reviews are leading to bad search results in the pack.";
   }
-  var cm = reviewsClientsModel(20);
   var html = "<div class='ps-block' id='solution-reviews'>";
   /* "Problem N" and the reviews headline sit centred across the top
      (Sam, Nov 20); below, copy on the left and the compact weekly
@@ -6207,7 +6388,19 @@ function reviewsProblemHTML(m, idx){
   if (cm && cm.phrase){
     html += "<p class='ps-clients'>" + esc(cm.phrase.lead) + "<span class='clients-big'>" + esc(cm.phrase.big) + "</span>" + esc(cm.phrase.suffix || "") + "</p>";
   } else if (cm){
-    html += "<p class='ps-clients'>At 20 new reviews, you should gain around <span class='clients-big'>a stronger hold on your position</span> — the model has you holding around #" + cm.mv.judgedPos + " while the base builds.</p>";
+    /* No clients phrase: the judged gain is real but too small to state
+       as clients a month without absurdity. State the move itself,
+       with the SAME enquiry figure the dollars section prices — never
+       a second number, and never “holding” when the model moves the
+       agency up. The figure already includes the trust gain (see
+       trustFactor): it is never the bare share delta between two
+       positions. */
+    var curPosFb = (typeof m.pos === "number") ? m.pos : null;
+    if (cm.mv.judgedPos && curPosFb && cm.mv.judgedPos < curPosFb){
+      html += "<p class='ps-clients'>At 20 new reviews, you should gain around <span class='clients-big'>a move up to around #" + cm.mv.judgedPos + " in the pack</span> (about " + fmtEnq(cm.mv.incEnq) + " new enquiries a month) — that figure prices the move and the trust the bigger base earns, and the base keeps building from there.</p>";
+    } else {
+      html += "<p class='ps-clients'>At 20 new reviews, you should gain around <span class='clients-big'>a stronger hold on your position</span> — the model has you holding around #" + cm.mv.judgedPos + " while the base builds.</p>";
+    }
   }
   /* No second combined-total paragraph here (Sam, Nov 19 — way too
      much text): the verdict sentence above already says will or will
@@ -6343,9 +6536,11 @@ function genericProblemHTML(heading, idx, m){
    a measured Google defect: it carries no dollars, is never added to
    the fix list, the critical-issues count or the headline total.
    #3: a SHARE block — #1 and #2 take the bigger share of the calls,
-   and #3 is losing out on that share. Its value is the report's own
-   live modelled move-up dollars (the #3→#1 model), never an invented
-   call multiple. Display only — those dollars already live in the
+   and #3 is losing out on that share. When reviews are the issue its
+   value is the one summed figure Problem 1 and the cost row carry
+   (reviewsClientsModel: core search + every graded service search),
+   never a core-only move-up figure and never an invented call
+   multiple. Display only — those dollars already live in the
    dollar model exactly once; this block adds nothing to any total. */
 function rankBlockHTML(m){
   var pos = effectivePackPos();
@@ -6355,9 +6550,34 @@ function rankBlockHTML(m){
   if (pos === 3){
     var bm = buildDollarModel();
     var valLine = "";
-    if (bm.upModel && bm.upModel.dollars > 0){
-      valLine = "<p class='ps-sub'>This report's model values the move from #3 up to #1 at <b>" + money(bm.upModel.dollars) + " a month</b> — +" + fmtEnq(bm.upModel.incEnq) + " enquiries a month &times; the 25% close rate &times; " + money(ECON.clientMonth) + " a client. The problems below, fixed in order, are how you take that share.</p>";
-    } else if (bm.positionModel && bm.positionModel.modelled && bm.positionModel.dollars > 0){
+    /* ONE NUMBER, ONE SOURCE (Sam, Nov 24): when reviews are the
+       issue, the share block reads the EXACT figure Problem 1 and
+       the cost row carry — reviewsClientsModel's mv, the summed
+       total across the core search AND every graded service search
+       (per-search gains at the realistic judged destinations, trust
+       included). Dollars, enquiries AND the move's destination all
+       come from that one object (mv.dollars, mv.incEnq,
+       mv.judgedPos). The share block never prices anything off the
+       core search alone: the old code gated the summed figure on
+       bm.upModel existing and took the destination from that
+       core-only model, and whenever the gate failed it fell back to
+       the core-only upModel / positionModel figures — so whenever
+       the service searches added anything, the share block printed
+       a smaller, different number from Problem 1 and the cost row.
+       The core-only fallbacks below now run ONLY when reviews are
+       not an issue at all (there is no Problem 1 reviews figure to
+       match in those reports); when reviews are the issue and the
+       summed model carries no figure, the block prints no figure
+       either — exactly as Problem 1 does — rather than a
+       core-only substitute. */
+    var cmShare = null;
+    if (bm.hasReviewsIssue){ try { cmShare = reviewsClientsModel(20); } catch (e) { cmShare = null; } }
+    if (cmShare && cmShare.mv && cmShare.mv.incEnq > 0){
+      var destShare = (typeof cmShare.mv.judgedPos === "number") ? cmShare.mv.judgedPos : ((bm.upModel && bm.upModel.toPos) ? bm.upModel.toPos : 1);
+      valLine = "<p class='ps-sub'>This report's model values +20 reviews at <b>" + money(cmShare.mv.dollars) + " a month</b> — the move from #3 up to #" + destShare + ", with the trust of a real review base behind the listing: +" + fmtEnq(cmShare.mv.incEnq) + " enquiries a month &times; the 25% close rate &times; " + money(ECON.clientMonth) + " a client. The problems below, fixed in order, are how you take that share.</p>";
+    } else if (!bm.hasReviewsIssue && bm.upModel && bm.upModel.dollars > 0){
+      valLine = "<p class='ps-sub'>This report's model values the move from #3 up to #" + (bm.upModel.toPos || 1) + " at <b>" + money(bm.upModel.dollars) + " a month</b> — +" + fmtEnq(bm.upModel.incEnq) + " enquiries a month &times; the 25% close rate &times; " + money(ECON.clientMonth) + " a client. The problems below, fixed in order, are how you take that share.</p>";
+    } else if (!bm.hasReviewsIssue && bm.positionModel && bm.positionModel.modelled && bm.positionModel.dollars > 0){
       valLine = "<p class='ps-sub'>The fixes below are modelled at <b>" + money(bm.positionModel.dollars) + " a month</b> in this report — the value of moving up from #3 toward #1. Fixed in order, they are how you take that share.</p>";
     }
     var shareRows = [0, 1, 2].map(function(i){
@@ -6465,11 +6685,11 @@ function renderDollars(){
     if (s2row) s2row.parts.forEach(function(pp){ if (pp.type === "service" && pp.modelled) svcIncDollars += pp.dollars; });
     var mergedAmt = m.upModel.dollars + svcIncDollars;
     mergedMoveRow = {
-      label: "+20 reviews moves you #" + m.pos + " \u2192 #1",
+      label: "+20 reviews moves you #" + m.pos + " \u2192 #" + ((m.upModel && m.upModel.toPos) ? m.upModel.toPos : 1),
       amount: mergedAmt, note: "", detailClass: "dol-detail-key",
       detail: "At 20 new reviews, we estimate this will get you an extra " + fmtEnq(mergedAmt / ECON.perEnquiryMonth) + " enquiries per month \u00d7 25% close rate \u00d7 " + money(ECON.clientMonth) + " = " + money(mergedAmt) + "/mo."
         + (svcIncDollars > 0.5 ? " That extra includes what the same +20 reviews add across your service searches, counted on this same row." : "")
-        + (m.hasPinAccuracyIssue ? " Fixing your map pin \u2014 correcting the business address/pin in your Google Business Profile so it lands on your real location \u2014 is part of this same move: the +20 reviews and the pin fix together drive the move to #1, so the pin is not a separate priced row." : "")
+        + (m.hasPinAccuracyIssue ? " Fixing your map pin \u2014 correcting the business address/pin in your Google Business Profile so it lands on your real location \u2014 is part of this same move: the +20 reviews and the pin fix together drive the move to #" + ((m.upModel && m.upModel.toPos) ? m.upModel.toPos : 1) + ", so the pin is not a separate priced row." : "")
     };
   }
   m.serviceModels.forEach(function(sm, si){
