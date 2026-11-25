@@ -4469,6 +4469,7 @@ function effectiveEnq(pos, reviews){
    $0 (a 0.21-enquiry gain is $47.78/mo, not $0). Display only — every
    dollar figure is computed from the unrounded difference. */
 function fmtEnq(n){ if (n === null || n === undefined || isNaN(n)) return "0"; var v = Math.round(n*100)/100; if (v % 1 === 0) return String(v); return v.toFixed(2).replace(/0$/,""); }
+function enqWord(n){ return fmtEnq(n) === "1" ? "enquiry" : "enquiries"; }
 function fmtMoney0(n){ return money(n); }
 /* Nearest comparable in a returned list: closest in review count first,
    rating breaks ties. Reviews do NOT order these lists (a 27-review
@@ -4735,7 +4736,7 @@ function buildDollarModel(){
          guards the degenerate edge. */
       if (incI <= 0 && runPos !== 1){ incI = Math.abs(enquiriesForPos(5) - enquiriesForPos(4)); estLabel = runLabel; estEnq = runEnq + incI; }
       m.positionIssueModels.push({ heading: h, kind: kind, fromLabel: runLabel, fromEnq: runEnq, estLabel: estLabel, estPos: estPos, estEnq: estEnq, incEnq: incI, dollars: incI * ECON.perEnquiryMonth,
-        working: "We estimate this will get you an extra " + fmtEnq(incI) + " enquiries per month \u00d7 25% close rate \u00d7 " + money(ECON.clientMonth) + " = " + money(incI * ECON.perEnquiryMonth) + "/mo." });
+        working: "We estimate this will get you an extra " + fmtEnq(incI) + " " + enqWord(incI) + " per month \u00d7 25% close rate \u00d7 " + money(ECON.clientMonth) + " = " + money(incI * ECON.perEnquiryMonth) + "/mo." });
       runPos = estPos; runEnq = estEnq; runLabel = estLabel;
     });
     var totInc = m.positionIssueModels.reduce(function(s, x){ return s + x.incEnq; }, 0);
@@ -4754,7 +4755,7 @@ function buildDollarModel(){
       /* Same one-fix-one-enquiry cap as the staged branch above. */
       if (shareInc > 1) shareInc = 1;
       return { heading: h, kind: classifyIssue(h).kind, fromLabel: ii === 0 ? "outside the returned list" : "around #4–#5", fromEnq: baseEnqNR, estLabel: ii === 0 ? "around #4–#5" : "#3", estPos: ii === 0 ? 4 : 3, estEnq: baseEnqNR + shareInc, incEnq: shareInc, dollars: shareInc * ECON.perEnquiryMonth,
-        working: "We estimate this will get you an extra " + fmtEnq(shareInc) + " enquiries per month \u00d7 25% close rate \u00d7 " + money(ECON.clientMonth) + " = " + money(shareInc * ECON.perEnquiryMonth) + "/mo." };
+        working: "We estimate this will get you an extra " + fmtEnq(shareInc) + " " + enqWord(shareInc) + " per month \u00d7 25% close rate \u00d7 " + money(ECON.clientMonth) + " = " + money(shareInc * ECON.perEnquiryMonth) + "/mo." };
     });
     var totDolNR = m.positionIssueModels.reduce(function(s, x){ return s + x.dollars; }, 0);
     var totIncNR = m.positionIssueModels.reduce(function(s, x){ return s + x.incEnq; }, 0);
@@ -6062,7 +6063,7 @@ function clientsPhrase(clientsPerMonth, enquiriesPerMonth){
      clients / 0.25 when the caller does not pass it directly. */
   var enq = (enquiriesPerMonth !== null && enquiriesPerMonth !== undefined && !isNaN(enquiriesPerMonth)) ? Number(enquiriesPerMonth) : clientsPerMonth / ECON.closeRate;
   var enqTxt = fmtEnq(enq);
-  var suffix = " (about " + enqTxt + " new enquiries a month)";
+  var suffix = " (about " + enqTxt + " new " + (enqTxt === "1" ? "enquiry" : "enquiries") + " a month)";
   if (clientsPerMonth >= 1){
     var r = Math.round(clientsPerMonth * 10) / 10;
     var txt = (r % 1 === 0) ? String(Math.round(r)) : String(r);
@@ -6518,7 +6519,7 @@ function reviewsProblemHTML(m, idx){
        positions. */
     var curPosFb = (typeof m.pos === "number") ? m.pos : null;
     if (cm.mv.judgedPos && curPosFb && cm.mv.judgedPos < curPosFb){
-      html += "<p class='ps-clients'>At 20 new reviews, you should gain around <span class='clients-big'>a move up to around #" + cm.mv.judgedPos + " in the pack</span> (about " + fmtEnq(cm.mv.incEnq) + " new enquiries a month) — that figure prices the move and the trust the bigger base earns, and the base keeps building from there.</p>";
+      html += "<p class='ps-clients'>At 20 new reviews, you should gain around <span class='clients-big'>a move up to around #" + cm.mv.judgedPos + " in the pack</span> (about " + fmtEnq(cm.mv.incEnq) + " new " + enqWord(cm.mv.incEnq) + " a month) — that figure prices the move and the trust the bigger base earns, and the base keeps building from there.</p>";
     } else {
       html += "<p class='ps-clients'>At 20 new reviews, you should gain around <span class='clients-big'>a stronger hold on your position</span> — the model has you holding around #" + cm.mv.judgedPos + " while the base builds.</p>";
     }
@@ -6575,7 +6576,7 @@ function genericProblemHTML(heading, idx, m){
         nameModel = pim.filter(function(x){ return x.heading === heading; })[0] || null;
       } catch (e) { nameModel = null; }
       var buysLine = (nameModel && nameModel.dollars > 0.5)
-        ? ("an extra " + fmtEnq(nameModel.incEnq) + " enquiries a month — " + money(nameModel.dollars) + "/mo, priced in the dollar section below")
+        ? ("an extra " + fmtEnq(nameModel.incEnq) + " " + enqWord(nameModel.incEnq) + " a month — " + money(nameModel.dollars) + "/mo, priced in the dollar section below")
         : "relevance — a name that matches the search, priced in the dollar section below";
       visual = "<div class='ps-data-card'><div class='lab'>Your name, and the fix</div>"
         + "<div class='row you'><span>Your listing name</span><b>" + esc((ownerCtx && ownerCtx.name) || "") + "</b></div>"
@@ -6695,9 +6696,9 @@ function rankBlockHTML(m){
     if (bm.hasReviewsIssue){ try { cmShare = reviewsClientsModel(20); } catch (e) { cmShare = null; } }
     if (cmShare && cmShare.mv && cmShare.mv.incEnq > 0){
       var destShare = (typeof cmShare.mv.judgedPos === "number") ? cmShare.mv.judgedPos : ((bm.upModel && bm.upModel.toPos) ? bm.upModel.toPos : 1);
-      valLine = "<p class='ps-sub'>This report's model values +20 reviews at <b>" + money(cmShare.mv.dollars) + " a month</b> — the move from #3 up to #" + destShare + ", with the trust of a real review base behind the listing: +" + fmtEnq(cmShare.mv.incEnq) + " enquiries a month &times; the 25% close rate &times; " + money(ECON.clientMonth) + " a client. The problems below, fixed in order, are how you take that share.</p>";
+      valLine = "<p class='ps-sub'>This report's model values +20 reviews at <b>" + money(cmShare.mv.dollars) + " a month</b> — the move from #3 up to #" + destShare + ", with the trust of a real review base behind the listing: +" + fmtEnq(cmShare.mv.incEnq) + " " + enqWord(cmShare.mv.incEnq) + " a month &times; the 25% close rate &times; " + money(ECON.clientMonth) + " a client. The problems below, fixed in order, are how you take that share.</p>";
     } else if (!bm.hasReviewsIssue && bm.upModel && bm.upModel.dollars > 0){
-      valLine = "<p class='ps-sub'>This report's model values the move from #3 up to #" + (bm.upModel.toPos || 1) + " at <b>" + money(bm.upModel.dollars) + " a month</b> — +" + fmtEnq(bm.upModel.incEnq) + " enquiries a month &times; the 25% close rate &times; " + money(ECON.clientMonth) + " a client. The problems below, fixed in order, are how you take that share.</p>";
+      valLine = "<p class='ps-sub'>This report's model values the move from #3 up to #" + (bm.upModel.toPos || 1) + " at <b>" + money(bm.upModel.dollars) + " a month</b> — +" + fmtEnq(bm.upModel.incEnq) + " " + enqWord(bm.upModel.incEnq) + " a month &times; the 25% close rate &times; " + money(ECON.clientMonth) + " a client. The problems below, fixed in order, are how you take that share.</p>";
     } else if (!bm.hasReviewsIssue && bm.positionModel && bm.positionModel.modelled && bm.positionModel.dollars > 0){
       valLine = "<p class='ps-sub'>The fixes below are modelled at <b>" + money(bm.positionModel.dollars) + " a month</b> in this report — the value of moving up from #3 toward #1. Fixed in order, they are how you take that share.</p>";
     }
@@ -6784,10 +6785,10 @@ function renderDollars(){
      estimate this will get you an extra X enquiries per month
      × 25% close rate × $910 = $Y/mo” — no position jargon. */
   function derivLine(incEnq, amt){
-    return "We estimate this will get you an extra " + fmtEnq(incEnq) + " enquiries per month \u00d7 25% close rate \u00d7 " + money(ECON.clientMonth) + " = " + money(amt) + "/mo";
+    return "We estimate this will get you an extra " + fmtEnq(incEnq) + " " + enqWord(incEnq) + " per month \u00d7 25% close rate \u00d7 " + money(ECON.clientMonth) + " = " + money(amt) + "/mo";
   }
   function derivLineReviews(incEnq, amt){
-    return "At 20 new reviews, we estimate this will get you an extra " + fmtEnq(incEnq) + " enquiries per month \u00d7 25% close rate \u00d7 " + money(ECON.clientMonth) + " = " + money(amt) + "/mo";
+    return "At 20 new reviews, we estimate this will get you an extra " + fmtEnq(incEnq) + " " + enqWord(incEnq) + " per month \u00d7 25% close rate \u00d7 " + money(ECON.clientMonth) + " = " + money(amt) + "/mo";
   }
   var lines = [];
   var s2row = m.stage2 && m.stage2[0];
@@ -6808,7 +6809,7 @@ function renderDollars(){
     mergedMoveRow = {
       label: "+20 reviews moves you #" + m.pos + " \u2192 #" + ((m.upModel && m.upModel.toPos) ? m.upModel.toPos : 1),
       amount: mergedAmt, note: "", detailClass: "dol-detail-key",
-      detail: "At 20 new reviews, we estimate this will get you an extra " + fmtEnq(mergedAmt / ECON.perEnquiryMonth) + " enquiries per month \u00d7 25% close rate \u00d7 " + money(ECON.clientMonth) + " = " + money(mergedAmt) + "/mo."
+      detail: "At 20 new reviews, we estimate this will get you an extra " + fmtEnq(mergedAmt / ECON.perEnquiryMonth) + " " + enqWord(mergedAmt / ECON.perEnquiryMonth) + " per month \u00d7 25% close rate \u00d7 " + money(ECON.clientMonth) + " = " + money(mergedAmt) + "/mo."
         + (svcIncDollars > 0.5 ? " That extra includes what the same +20 reviews add across your service searches, counted on this same row." : "")
         + (m.hasPinAccuracyIssue ? " Fixing your map pin \u2014 correcting the business address/pin in your Google Business Profile so it lands on your real location \u2014 is part of this same move: the +20 reviews and the pin fix together drive the move to #" + ((m.upModel && m.upModel.toPos) ? m.upModel.toPos : 1) + ", so the pin is not a separate priced row." : "")
     };
