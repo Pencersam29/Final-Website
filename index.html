@@ -4579,22 +4579,26 @@ function modelService(service, reviewsOverride){
   if (!comp) return { service: service, modelled: false, reason: "position not modelled — no comparable in the returned list for this search" };
   var estPos = comp.pos;
   var enq = enquiriesForPos(estPos);
-  /* ONE MISSED SERVICE, ABOUT 2 ENQUIRIES (Sam, Nov 24 —
-     Comprehensive Home Care, Milwaukee): the raw model priced
-     naming 24-hour care at the comparable's FULL position value —
-     7.7 enquiries a month, $1,752/mo — as if every enquiry that
-     position receives in the “24-hour care” search were new
-     business the fix creates. It is not: that search is one narrow
-     slice of the market, and a single missed-service fix — naming
-     one service the page never mentions — is worth about 2
-     enquiries a month. The PRICED gain (incEnq, and the dollars
-     built on it) is therefore capped at 2 enquiries a month,
-     exactly like the one-fix-one-enquiry cap on the staged
-     relevance steps. enq itself stays the comparable position's
-     full modelled enquiries: Stage 2's post-fix bases and the
-     rating scenario read it as a position, not a gain, and the
-     pack-entry maths built on those bases is unchanged. */
-  var incEnq = Math.min(enq, 2);
+  /* ONE MISSED SERVICE, ABOUT 1 ENQUIRY (Sam, Nov 25 —
+     Comprehensive Home Care, Milwaukee, research-checked):
+     the raw model priced naming 24-hour care at the comparable's
+     FULL position value — 7.7 enquiries a month, $1,752/mo — as
+     if every enquiry that position receives in the “24-hour
+     care” search were new business the fix creates. It is not:
+     that search is one narrow slice of the market. Research for
+     Milwaukee County puts 24-hour care at about 246 searches a
+     month; at about 8% capture and about 5% conversion that is
+     about 1 enquiry a month (2 is the optimistic ceiling). A
+     single missed-service fix — naming one service the page
+     never mentions — is therefore worth 1 enquiry a month,
+     $227.50. The PRICED gain (incEnq, and the dollars built on
+     it) is capped at 1 enquiry a month, exactly like the
+     one-fix-one-enquiry cap on the staged relevance steps. enq
+     itself stays the comparable position's full modelled
+     enquiries: Stage 2's post-fix bases and the rating scenario
+     read it as a position, not a gain, and the pack-entry maths
+     built on those bases is unchanged. */
+  var incEnq = Math.min(enq, 1);
   return { service: service, modelled: true, comp: comp, estPos: estPos, enq: enq, incEnq: incEnq, dollars: incEnq * ECON.perEnquiryMonth, placesCount: places.length, query: entry.query || "" };
 }
 function modelCoreAtReviews(reviewsOverride){
