@@ -4300,12 +4300,14 @@ function renderOwnerSummary(){
     ctx.packList.forEach(function(b, i){ if (b.you && i >= 3) youBeyond = b; });
     if (youBeyond){
       var between = youBeyond.n - 4;
-      rows += "<div class='ob-cut'>— the pack ends here" + (between > 0 ? " · " + between + (between === 1 ? " listing" : " listings") + " between the pack and you" : "") + " —</div>" + rankRow(youBeyond, true);
+      rows += (ctx.placesOrder
+        ? "<div class='ob-cut'>— the top 3 returned end here" + (between > 0 ? " · " + between + (between === 1 ? " listing" : " listings") + " between the top 3 and you" : "") + " —</div>"
+        : "<div class='ob-cut'>— the pack ends here" + (between > 0 ? " · " + between + (between === 1 ? " listing" : " listings") + " between the pack and you" : "") + " —</div>") + rankRow(youBeyond, true);
     }
   } else {
     rows = (ctx.beating || []).slice(0, 3).map(function(b){ return rankRow(b, false); }).join("");
     if (ctx.youLabel !== null && ctx.youLabel !== undefined && !(ctx.youRank && ctx.youRank <= 3)){
-      if ((ctx.beating || []).length >= 3) rows += "<div class='ob-cut'>— the pack ends here —</div>";
+      if ((ctx.beating || []).length >= 3) rows += ctx.placesOrder ? "<div class='ob-cut'>— the top 3 returned end here —</div>" : "<div class='ob-cut'>— the pack ends here —</div>";
       rows += "<div class='ob-rrow you'><span class='medal'>" + esc(ctx.youLabel) + "</span><span><span class='nm'>" + esc(ctx.name || ctx.short) + "</span>" + (prof.rating ? "<span class='dt'> · " + prof.rating + " ★ · " + prof.reviews + " reviews</span>" : "") + "</span></div>";
     }
   }
@@ -4677,6 +4679,53 @@ function servicePlacesFor(service){
 function corePlacesList(){
   var corePlaces = (ownerCtx && ownerCtx.corePlaces) ? placesFromList(ownerCtx.corePlaces) : [];
   return corePlaces.filter(function(pl){ return norm(pl.name) !== norm((ownerCtx && (ownerCtx.agencyName || ownerCtx.name || ownerCtx.short)) || ""); });
+}
+/* ---------- Reviews already lead the first 3 returned ----------
+   True when the graded agency already sits in the first 3 listings
+   Google Places returned for the core search AND already holds the
+   highest review count among those 3 — UNLESS the rating-gap pattern
+   holds (the agency rates at least 0.3 stars below EVERY other
+   listing in the first 3), where the average, not the count, is the
+   constraint and a reviews gain stays priced. Reads the report's own
+   returned list (ownerCtx.corePlaces, in returned order, agency
+   included) — never the Maps pack, which Places order cannot speak
+   for. Any gap in the data (no returned list, agency not in the
+   first 3, a missing review count) returns false: no suppression
+   without the full picture. */
+function reviewsGainSuppressed(m){
+  try {
+    if (!ownerCtx || !m) return false;
+    var rev = (m.agencyReviews === null || m.agencyReviews === undefined) ? null : Number(m.agencyReviews);
+    if (rev === null || isNaN(rev)) return false;
+    var raw = (ownerCtx.corePlaces && ownerCtx.corePlaces.length) ? ownerCtx.corePlaces : null;
+    if (!raw || raw.length < 2) return false;
+    var agencyName = ownerCtx.agencyName || ownerCtx.name || ownerCtx.short || "";
+    var idx = -1;
+    for (var i = 0; i < raw.length; i++){
+      var pl = raw[i];
+      if (ownerCtx.agencyPlaceId && pl.place_id && pl.place_id === ownerCtx.agencyPlaceId){ idx = i; break; }
+      if (norm(pl.name || "") === norm(agencyName)){ idx = i; break; }
+    }
+    if (idx < 0 || idx > 2) return false;
+    var others = [];
+    raw.slice(0, 3).forEach(function(pl2, i2){ if (i2 !== idx) others.push(pl2); });
+    if (!others.length) return false;
+    for (var j = 0; j < others.length; j++){
+      var orev = (others[j].reviews === null || others[j].reviews === undefined) ? null : Number(others[j].reviews);
+      if (orev === null || isNaN(orev)) return false;
+      if (rev < orev) return false;
+    }
+    var rating = (m.agencyRatingVal === null || m.agencyRatingVal === undefined || m.agencyRatingVal === "—") ? null : parseFloat(m.agencyRatingVal);
+    if (rating !== null && !isNaN(rating)){
+      var gap = true;
+      for (var k = 0; k < others.length; k++){
+        var orat = (others[k].rating === null || others[k].rating === undefined || others[k].rating === "—") ? null : parseFloat(others[k].rating);
+        if (orat === null || isNaN(orat) || orat - rating < 0.299){ gap = false; break; }
+      }
+      if (gap) return false;
+    }
+    return true;
+  } catch (e) { return false; }
 }
 function buildDollarModel(){
   var m = dollarModel();
@@ -5110,6 +5159,44 @@ function buildDollarModel(){
       }
     }
   }
+  /* REVIEWS NOT THE BINDING CONSTRAINT (Sam, Nov 26 — IntegraCare
+     Toronto: #2 in the order Places returned, 117 reviews against
+     Home Instead Toronto's 65 and Qualicare's 62 in the rest of the
+     first 3, rating 4.8 against 5.0 and 5.0): when the agency is in
+     the first 3 listings Places returned and already holds the
+     highest review count among them, the count is not what holds it
+     back, and +20 more reviews on top of double the next listing's
+     base is not a gain this model may price (the live report priced
+     it at 14.7 extra enquiries a month). So the reviews gain is
+     zeroed HERE — the one place the headline total, the Stage 2 row
+     and the “20 more reviews, on top of the fixes above” row all
+     read from: no Stage 2 dollars, no rating-scenario dollars, and
+     (where reviews are an issue and the in-pack move-up IS the +20
+     gain) no upModel dollars in Stage 1 either. The report keeps
+     its non-review issues, priced on their own rows alone. The one
+     exception is the rating-gap pattern — the agency rates at
+     least 0.3 stars below every other listing in the first 3
+     (IntegraCare's 0.2 gap is not it) — where reviewsGainSuppressed
+     returns false and the gain stays exactly as priced today.
+     Agencies behind on reviews never meet the condition, so their
+     numbers, the in-pack cap and the pack-entry output are
+     untouched. */
+  m.reviewsGainSuppressed = reviewsGainSuppressed(m);
+  if (m.reviewsGainSuppressed){
+    if (m.stage2 && m.stage2[0]){
+      var s2s = m.stage2[0];
+      s2s.parts.forEach(function(pp){ if (pp.modelled){ pp.incEnq = 0; pp.dollars = 0; pp.enq = pp.baseEnq; } });
+      s2s.totalIncEnq = 0; s2s.totalDollars = 0; s2s.anyChange = false;
+    }
+    m.stage2Total = 0;
+    m.ratingModel = null;
+    if (m.hasReviewsIssue && m.upModel){
+      m.stage1Total -= m.upModel.dollars;
+      if (m.stage1Total < 0) m.stage1Total = 0;
+      m.stage1Year = m.stage1Total * 12;
+      m.upModel = null;
+    }
+  }
   // Headline total = Stage 1 + Stage 2. Stage 2 is not a side note: its
   // incremental dollars are part of what the issues are costing. For a
   // rating-gap agency the reviews contribution is the rating scenario
@@ -5121,7 +5208,10 @@ function buildDollarModel(){
   return m;
 }
 function currentPosLabel(m){
-  if (typeof m.pos === "number") return m.pos <= 3 ? ("#" + m.pos + " — in the pack") : ("#" + m.pos + " — outside the pack");
+  if (typeof m.pos === "number"){
+    if (ownerCtx && ownerCtx.placesOrder) return m.pos <= 3 ? ("#" + m.pos + " — in the top 3 Google Places returned (returned order, not the Google Maps pack order)") : ("#" + m.pos + " — outside the top 3 Google Places returned");
+    return m.pos <= 3 ? ("#" + m.pos + " — in the pack") : ("#" + m.pos + " — outside the pack");
+  }
   if (m.pos === "outside") return (ownerCtx && ownerCtx.fetchedCount) ? ("outside the pack — not in the top " + ownerCtx.fetchedCount + " listings returned") : "outside the pack";
   return "outside the pack";
 }
@@ -6266,6 +6356,14 @@ function reviewsClientsModel(delta){
   var m0 = dollarModel();
   if (!m0.hasReviewsIssue || m0.agencyReviews === null || m0.agencyReviews === undefined || !ownerCtx) return null;
   var target = m0.agencyReviews + (delta || 20);
+  /* Reviews already lead the first 3 returned (see
+     reviewsGainSuppressed): the +20 gain is not priced anywhere in
+     this report, so Problem 1 and the share block carry no clients
+     figure for it either — the same zero-gain shape the model
+     returns when the judged gain is nil. */
+  if (reviewsGainSuppressed(m0)){
+    return { mv: { newReviews: target, judgedPos: (typeof m0.pos === "number") ? m0.pos : null, incEnq: 0 }, clients: 0, phrase: null, queries: [] };
+  }
   var jr = judgedReviewQueries(target);
   if (!jr) return null;
   var queries = jr.queries, totalInc = jr.totalInc;
@@ -6346,7 +6444,9 @@ function packVerdictSentence(m){
   var o = combinedPackOutcome(m);
   if (!o) return "";
   var kw = (ownerCtx && ownerCtx.keyword) || "home care";
-  if (o.alreadyInPack) return "You are already in the map pack for “" + kw + "”. With all the fixes done and 20 new reviews (" + o.newReviews + " reviews in total), we estimate Stride will move you up to around #" + o.judgedPos + " inside the pack.";
+  if (o.alreadyInPack) return (ownerCtx && ownerCtx.placesOrder)
+    ? "You're #" + o.curPos + " in the order Google Places returned for “" + kw + "” — returned order, not the Google Maps pack order, so no map-pack place is claimed from it. With all the fixes done and 20 new reviews (" + o.newReviews + " reviews in total), we estimate Stride will move you up to around #" + o.judgedPos + " in that returned order."
+    : "You are already in the map pack for “" + kw + "”. With all the fixes done and 20 new reviews (" + o.newReviews + " reviews in total), we estimate Stride will move you up to around #" + o.judgedPos + " inside the pack.";
   if (o.inPack) return "With all the fixes done and 20 new reviews (" + o.newReviews + " reviews in total), we estimate Stride will put you in the map pack — around #" + o.judgedPos + " for “" + kw + "”, " + (o.curPos ? ("up from #" + o.curPos + " today") : "up from outside the pack today") + ".";
   var s = "Even with all the fixes done and 20 new reviews (" + o.newReviews + " reviews in total), we estimate Stride will not put you in the map pack — you would sit at around #" + o.judgedPos + " for “" + kw + "”, still outside the top 3.";
   var pt = o.packThird;
@@ -6712,8 +6812,13 @@ function rankBlockHTML(m){
     var html3 = "<div class='ps-block ps-centered' id='solution-share'>";
     html3 += "<div class='ps-copy'>";
     html3 += "<p class='ps-kicker'>The share problem</p>";
-    html3 += "<h3 class='ps-title'>You're #3 in the pack — and #1 and #2 take the bigger share of the calls.</h3>";
-    html3 += "<p class='ps-problem'>For &ldquo;" + esc(kw) + "&rdquo; you're in the map pack, but you're losing out on the share: <b>#1 and #2 get the bigger share of the calls</b>, and every family who calls a listing above you first is a client you never get to talk to. You want to be #1 or #2 — that's where the calls concentrate.</p>";
+    if (ownerCtx && ownerCtx.placesOrder){
+      html3 += "<h3 class='ps-title'>You're #3 in the order Google Places returned — and #1 and #2 take the bigger share of the calls.</h3>";
+      html3 += "<p class='ps-problem'>For &ldquo;" + esc(kw) + "&rdquo; you're #3 in the order Google Places returned — returned order, not the Google Maps pack order — and you're losing out on the share: <b>#1 and #2 get the bigger share of the calls</b>, and every family who calls a listing above you first is a client you never get to talk to. You want to be #1 or #2 — that's where the calls concentrate.</p>";
+    } else {
+      html3 += "<h3 class='ps-title'>You're #3 in the pack — and #1 and #2 take the bigger share of the calls.</h3>";
+      html3 += "<p class='ps-problem'>For &ldquo;" + esc(kw) + "&rdquo; you're in the map pack, but you're losing out on the share: <b>#1 and #2 get the bigger share of the calls</b>, and every family who calls a listing above you first is a client you never get to talk to. You want to be #1 or #2 — that's where the calls concentrate.</p>";
+    }
     if (valLine) html3 += valLine;
     html3 += "</div></div>";
     return html3;
@@ -6944,7 +7049,7 @@ function renderDollars(){
   if (total > 0){
     html += "<div class='dol-makeback'><h3>Start earning the " + money(total) + " back by using Stride.</h3><div class='cta-row'><a class='btn-buy' href='https://providers.stridewellness.ca/agency/start' target='_blank' rel='noopener'>Get Access with Stride</a><a class='btn-chat' href='https://bookings.cloud.microsoft/bookwithme/user/9f85ecaacd5e47e88e9c73c1120d53ec%40stridewellness.ca?anonymous&ismsaljsauthenabled' target='_blank' rel='noopener'>Chat with Sales</a></div></div>";
   }
-  html += "<p class='dol-foot'>Headline = the non-review fixes (Stage 1) + the reviews gain on top of them (Stage 2), each counted once &middot; 25% close rate &middot; one client = " + money(ECON.clientMonth) + "/mo profit (30 hrs/wk &times; $7/hr). The Move above and this section use the same model at the same +20 new reviews: the Move prices them from where you sit today — their standalone value — and this section adds that value on top of the fixes, because relevance and reviews are separate ranking factors. The only part trimmed is where the combined move on a search would pass #1, since no listing can beat #1. Where moving up is itself the reviews gain, it appears once, on one row." + (m.ratingModel ? " Where the reviews issue is the rating itself, the reviews row prices the climb to the pack's floor rating instead of the +20 scenario — at +20 reviews the average has barely moved, so that is where the gain actually books." : "") + "</p>";
+  html += "<p class='dol-foot'>Headline = the non-review fixes (Stage 1) + the reviews gain on top of them (Stage 2), each counted once &middot; 25% close rate &middot; one client = " + money(ECON.clientMonth) + "/mo profit (30 hrs/wk &times; $7/hr). The Move above and this section use the same model at the same +20 new reviews: the Move prices them from where you sit today — their standalone value — and this section adds that value on top of the fixes, because relevance and reviews are separate ranking factors. The only part trimmed is where the combined move on a search would pass #1, since no listing can beat #1. Where moving up is itself the reviews gain, it appears once, on one row." + (m.ratingModel ? " Where the reviews issue is the rating itself, the reviews row prices the climb to the pack's floor rating instead of the +20 scenario — at +20 reviews the average has barely moved, so that is where the gain actually books." : "") + (m.reviewsGainSuppressed ? " Reviews add nothing to this total: your review count already leads the first 3 listings Google Places returned, so no +20-reviews gain is priced — the total above is the fixes alone." : "") + "</p>";
   box.innerHTML = html;
 }
 var liveStatus = "idle"; /* idle | loading | ok | zero | unreachable */
@@ -7402,22 +7507,24 @@ function renderMapPack(o){
   var box = document.getElementById("mappack-content");
   if (!box) return;
   var q = o.queryLabel || "";
-  var expl = "<p class='mp-status'><b>The map pack</b> — the 3 listings Google shows first" + (q ? " for “" + esc(q) + "”" : "") + ", read from Google's returned list for that search. Below: the pack itself, and where you sit in the full list.</p>";
+  var expl = o.mode === "textsearch"
+    ? "<p class='mp-status'><b>The first 3 listings Google Places returned</b>" + (q ? " for “" + esc(q) + "”" : "") + ", in returned order. Places' returned order is not the Google Maps pack order, so no map-pack place is read from it. Below: those first 3, and where you sit in the full returned list.</p>"
+    : "<p class='mp-status'><b>The map pack</b> — the 3 listings Google shows first" + (q ? " for “" + esc(q) + "”" : "") + ", read from Google's returned list for that search. Below: the pack itself, and where you sit in the full list.</p>";
   var status = "", list = "";
   if (o.mode === "textsearch"){
     var order = o.order || [];
     var idx = -1;
     order.forEach(function(pl, i){ if (idx === -1 && isAgencyListing(o.agencyPlaceId, o.agencyName, pl)) idx = i; });
     if (idx === -1 && o.apiInvisible) status = "<p class='mp-status' style='margin-top:14px'><b>" + esc(o.agencyName) + "</b> is <b>not among the " + order.length + " listings the Places API returned</b> for that search — the API doesn't return this listing at all (it is verified on Google Maps), so this list can't place it and no position is read from it.</p>";
-    else if (idx === -1) status = "<p class='mp-status' style='margin-top:14px'><b>" + esc(o.agencyName) + "</b> is <b>not in the top " + order.length + " returned</b> for that search — outside the pack. No position beyond that window is claimed.</p>";
+    else if (idx === -1) status = "<p class='mp-status' style='margin-top:14px'><b>" + esc(o.agencyName) + "</b> is <b>not in the top " + order.length + " returned</b> for that search — outside the top 3 returned. No position beyond that window is claimed.</p>";
     else if (idx < 3) status = "<p class='mp-status' style='margin-top:14px'><b>" + esc(o.agencyName) + "</b> is <b>in the top 3 returned — #" + (idx + 1) + " of " + order.length + " returned</b> for this search.</p>";
-    else if (idx === 3) status = "<p class='mp-status' style='margin-top:14px'><b>" + esc(o.agencyName) + "</b> is <b>#4 of " + order.length + " returned — one place below the pack</b>. That one place is the whole gap.</p>";
-    else status = "<p class='mp-status' style='margin-top:14px'><b>" + esc(o.agencyName) + "</b> is <b>#" + (idx + 1) + " of " + order.length + " returned — outside the pack</b> (the top 3 above).</p>";
+    else if (idx === 3) status = "<p class='mp-status' style='margin-top:14px'><b>" + esc(o.agencyName) + "</b> is <b>#4 of " + order.length + " returned — one place below the top 3 returned</b>. That one place is the whole gap.</p>";
+    else status = "<p class='mp-status' style='margin-top:14px'><b>" + esc(o.agencyName) + "</b> is <b>#" + (idx + 1) + " of " + order.length + " returned — outside the top 3 returned</b> (the top 3 above).</p>";
     if (order.length){
       list = "<div class='mp-list'>" + order.slice(0, 3).map(function(pl, i){
         var isYou = isAgencyListing(o.agencyPlaceId, o.agencyName, pl);
         return "<div class='mp-row" + (isYou ? " you" : "") + "'><span class='medal " + (i === 0 ? "g1" : i === 1 ? "g2" : "g3") + "'>" + (i + 1) + "</span><span><span class='nm'>" + esc(pl.name) + (isYou ? " — you" : "") + "</span>" + (pl.rating && pl.rating !== "—" ? "<span class='dt'> · " + pl.rating + " ★ · " + pl.reviews + " reviews</span>" : "") + "</span></div>";
-      }).join("") + "<div class='mp-cut'>— the pack ends here —</div>"
+      }).join("") + "<div class='mp-cut'>— the top 3 returned end here —</div>"
         + (idx >= 3 ? "<div class='mp-row you'><span class='medal'>" + (idx + 1) + "</span><span><span class='nm'>" + esc(o.agencyName) + " — you</span>" + (order[idx].rating && order[idx].rating !== "—" ? "<span class='dt'> · " + order[idx].rating + " ★ · " + order[idx].reviews + " reviews</span>" : "") + "</span></div>" : "")
         + "</div>";
     }
@@ -8927,8 +9034,13 @@ async function attachLiveRankings(g){
   var apiInvisible = idx === -1 && !!g.placesApiMissing;
   var mapsRanked = idx === -1 && typeof g.mapsRank === "number";
   ownerCtx.packPos = idx > -1 ? idx + 1 : (mapsRanked ? g.mapsRank : (apiInvisible ? null : "outside"));
+  /* A position read off the Places returned list is a Places-order
+     position — never a map-pack place (Sam, Nov 26). Flag it so
+     beatingInfo and every label downstream use returned-order
+     wording; only a Maps-verified rank may speak of the pack. */
+  ownerCtx.placesOrder = mapsRanked ? false : (idx > -1 ? true : ownerCtx.placesOrder);
   ownerCtx.rankText = idx > -1 ? ("#" + (idx + 1) + " of " + comps.length + " returned") : (mapsRanked ? ("#" + g.mapsRank + " on Google Maps") : (apiInvisible ? "Not returned by the Places API" : ("Not in the top " + comps.length + " returned")));
-  ownerCtx.rankSub = idx > -1 ? (idx < 3 ? "In the map pack — top 3" : "Outside the map pack — top 3") : (mapsRanked ? ("Verified on Google Maps " + (g.mapsRankDate || g.verifiedDate || "") + " for “home care in " + label + "” — in the map pack (top 3). The Places API doesn't return this listing, so its list is never used as this listing's rank.") : (apiInvisible ? "Verified on Google Maps — the Places API doesn't return this listing, so no position is read from its list" : "Verified on Google Maps — the Places API doesn't return this listing"));
+  ownerCtx.rankSub = idx > -1 ? (idx < 3 ? "In the top 3 Google Places returned — returned order, not the Google Maps pack order" : "Outside the top 3 Google Places returned — returned order, not the Google Maps pack order") : (mapsRanked ? ("Verified on Google Maps " + (g.mapsRankDate || g.verifiedDate || "") + " for “home care in " + label + "” — in the map pack (top 3). The Places API doesn't return this listing, so its list is never used as this listing's rank.") : (apiInvisible ? "Verified on Google Maps — the Places API doesn't return this listing, so no position is read from its list" : "Verified on Google Maps — the Places API doesn't return this listing"));
   ownerCtx.mapsText = idx > -1 ? ("#" + (idx + 1) + " of " + comps.length + " returned") : (mapsRanked ? ("#" + g.mapsRank + " on Google Maps · verified " + (g.mapsRankDate || g.verifiedDate || "")) : (apiInvisible ? "Not returned by the Places API" : ("Not in the top " + comps.length + " returned")));
   ownerCtx.beatingHeading = "Local rankings — “home care in " + label + "”";
   if (mapsRanked){
@@ -8954,15 +9066,15 @@ async function attachLiveRankings(g){
     ownerCtx.beatingNote = "Google Maps' own order for “home care in " + label + "”, verified " + (g.mapsRankDate || g.verifiedDate || "") + " — " + (g.mapsRankResults || "the results") + " results shown: " + (g.mapsAhead && g.mapsAhead.length === 1 ? g.mapsAhead[0].name + " is #1 and " : "") + g.short + " is #" + g.mapsRank + ", in the map pack. The Places API's returned list for the same search doesn't include this listing at all, so it is never read as this listing's rank — the competitor detail below comes from that list, the rank comes from Maps.";
   } else if (idx > -1){
     ownerCtx.packList = comps.map(function(c, i){ return { n: i + 1, name: c.name, detail: c.rating + " ★ · " + c.reviews + " reviews", you: i === idx }; });
-    ownerCtx.beatingNote = "Google Places' returned order for “home care in " + label + "”, pulled live — the top 3 are the map pack, and where " + g.short + " sits in that list.";
+    ownerCtx.beatingNote = "Google Places' returned order for “home care in " + label + "”, pulled live — the first 3 in that returned order (Places order is not the Google Maps pack order), and where " + g.short + " sits in that list.";
   } else {
     ownerCtx.packList = null;
     ownerCtx.beating = comps.slice(0, 3).map(function(c, i){ return { n: i + 1, name: c.name, detail: c.rating + " ★ · " + c.reviews + " reviews" }; });
     if (apiInvisible){
       ownerCtx.subline = "Verified on Google Maps — the Places API doesn't return this listing at all, so the list below is who the API returns for this search, and no position is read from it.";
-      ownerCtx.beatingNote = "Google Places' returned list for “home care in " + label + "”, pulled live — the top 3 are the map pack in that list. " + g.short + " is not in it, and never could be: the Places API doesn't return this listing at all (it is verified on Google Maps), so this list can't place it — no position, and no count of agencies ahead of it, is read from a list it can't appear in.";
+      ownerCtx.beatingNote = "Google Places' returned list for “home care in " + label + "”, pulled live — the first 3 listings in that returned list. " + g.short + " is not in it, and never could be: the Places API doesn't return this listing at all (it is verified on Google Maps), so this list can't place it — no position, and no count of agencies ahead of it, is read from a list it can't appear in.";
     } else {
-      ownerCtx.beatingNote = "Google Places' returned list for “home care in " + label + "”, pulled live — the top 3 are the map pack. " + g.short + " is not in the " + comps.length + " listings the API returned: its listing is verified on Google Maps, but the Places API doesn't return it, so in the list families' searches actually surface, it sits outside — below every agency above.";
+      ownerCtx.beatingNote = "Google Places' returned list for “home care in " + label + "”, pulled live — the first 3 listings in that returned list. " + g.short + " is not in the " + comps.length + " listings the API returned: its listing is verified on Google Maps, but the Places API doesn't return it, so in the list families' searches actually surface, it sits outside — below every agency above.";
     }
   }
   ownerCtx.sourceLabel = (g.mapsVerified ? "Verified directory · Google Maps listing verified " + (g.verifiedDate || "Nov 10, 2026") : "Verified directory · Google Places listing verified Nov 10, 2026") + " · Local rankings: live Google Places via the Stride proxy";
@@ -8991,7 +9103,7 @@ async function attachLiveRankings(g){
   var dr = document.getElementById("d-rank");
   if (dr) dr.textContent = ownerCtx.rankText;
   var drl = document.getElementById("d-rank-lab");
-  if (drl) drl.textContent = mapsRanked ? ("verified on Google Maps " + (g.mapsRankDate || g.verifiedDate || "") + " for “home care in " + label + "” — in the map pack (top 3)") : (apiInvisible ? "the Places API doesn't return this listing — no position is read from its returned list" : "returned for “home care in " + label + "” — the top 3 are the map pack");
+  if (drl) drl.textContent = mapsRanked ? ("verified on Google Maps " + (g.mapsRankDate || g.verifiedDate || "") + " for “home care in " + label + "” — in the map pack (top 3)") : (apiInvisible ? "the Places API doesn't return this listing — no position is read from its returned list" : "returned for “home care in " + label + "” — the first 3 in Places' returned order, not the Google Maps pack order");
 }
 /* ---------- No listing returned by the Places API: the finding is the API zero itself.
    A Places API zero NEVER means "not on Google": the listing can exist on
