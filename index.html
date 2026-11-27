@@ -6612,9 +6612,24 @@ function reviewsProblemHTML(m, idx){
      17-review #2, never the 94-review #1 — so its line says move up,
      not number one. */
   var cm = reviewsClientsModel(20);
+  /* Differentiation case (Sam, Nov 27): in the first 3, trailing
+     the first 3's review leader, with +20 enough to pass that
+     leader (Right at Home Greater Vancouver: 46 against 56 —
+     66 would lead). The line names that measured gap and the
+     move that closes it; the generic “jump to number one” line
+     below is wrong here — the agency already holds a top spot,
+     and what it lacks is the deepest base, not the position. An
+     agency that already leads the first 3 on reviews
+     (outReviewsPack) never reaches this branch. */
+  var leaderMaxDiff = leaderNums.length ? Math.max.apply(null, leaderNums) : null;
+  var diffCase = !!(inPackNow && !outReviewsPack && leaderMaxDiff !== null
+    && m.agencyReviews !== null && m.agencyReviews !== undefined
+    && Number(m.agencyReviews) < leaderMaxDiff && Number(m.agencyReviews) + 20 > leaderMaxDiff);
   if (ratingGapCase){
     var lrSorted = leaderRatings.slice().sort(function(x, y){ return x - y; });
     redLine = "Your reviews aren't too few — they're too low: " + m.agencyReviews + " reviews at " + parseFloat(rating).toFixed(1) + " stars, against " + lrSorted[0].toFixed(1) + "–" + lrSorted[lrSorted.length - 1].toFixed(1) + " stars in the pack. You have the deepest review base here; the average is what's holding you back.";
+  } else if (diffCase){
+    redLine = "Your review count trails the top of this list — " + m.agencyReviews + " reviews against " + leaderMaxDiff + " — and 20 new reviews would put you ahead of every listing here, with the deepest review base in the pack.";
   } else if (inPackNow || outReviewsPack){
     redLine = (cm && cm.mv && typeof cm.mv.judgedPos === "number" && cm.mv.judgedPos > 1)
       ? "You need more Google reviews to move up in your local ranking \u2014 get new reviews and you'll go higher."
@@ -6977,6 +6992,7 @@ function renderDollars(){
     lines.push({ label: "Move up to #1 in the pack", amount: m.upModel.dollars, note: "", detail: derivLine(m.upModel.incEnq, m.upModel.dollars) });
   }
   var reviewsRowPushed = false;
+  var diffUnpricedRow = false;
   /* The reviews row's description is TWO sentences and nothing else
      (Sam, Nov 19 — the old version stacked the standalone value, the
      on-top residue and the combined total into one wall of text, and
@@ -7067,6 +7083,30 @@ function renderDollars(){
       reviewsRowPushed = true;
       return;
     }
+    /* DIFFERENTIATION, UNPRICED (Sam, Nov 27): this heading is in
+       the list because the agency sits in the first 3, trails the
+       first 3's review leader, and +20 reviews would pass that
+       leader (Right at Home Greater Vancouver: 46 against 56).
+       When the existing reviews model still yields a nonzero gain
+       for the move, the priced row below runs exactly as for any
+       reviews issue. But when the model books ZERO — the agency
+       already holds the top position at full trust, so there are
+       no extra enquiries to price — no dollar figure is invented
+       for differentiation: the row prints unpriced, and when it
+       is the report's only row the section prints no monthly
+       total at all rather than a fake “$0 a month”. */
+    var packMaxD = (m.packCounts || []).length ? Math.max.apply(null, (m.packCounts || []).map(function(n){ return Number(n); })) : null;
+    var diffCaseD = !isRatingRow && typeof m.pos === "number" && m.pos >= 1 && m.pos <= 3
+      && packMaxD !== null && m.agencyReviews !== null && m.agencyReviews !== undefined
+      && Number(m.agencyReviews) < packMaxD && Number(m.agencyReviews) + 20 > packMaxD;
+    if (diffCaseD && amt <= 0){
+      lines.push({ label: compLabel, amount: null, note: "differentiation — no dollar figure",
+        detail: "You already hold the top position in this list, so this model books no extra enquiries for the move — its value is differentiation, not position: 20 new reviews take you from " + m.agencyReviews + " to " + (Number(m.agencyReviews) + 20) + " reviews, ahead of the " + packMaxD + " that lead the pack today. No dollar figure is put on that here.",
+        detailClass: "dol-detail-key", _reviewsRow: true });
+      reviewsRowPushed = true;
+      diffUnpricedRow = true;
+      return;
+    }
     var detail = reviewsDetail(s2inc, amt);
     lines.push({ label: compLabel, amount: amt, note: "", detail: detail, detailClass: "dol-detail-key", _reviewsRow: true });
     reviewsRowPushed = true;
@@ -7079,7 +7119,12 @@ function renderDollars(){
   if (!reviewsRowPushed && s2row && s2row.totalDollars > 1){
     lines.push({ label: "20 more reviews, on top of the fixes above", amount: s2row.totalDollars, note: "", detail: reviewsDetail(s2row.totalIncEnq, s2row.totalDollars) });
   }
-  var html = "<div class='dol-total'>" + (total > 0 ? money(total) : "$0") + "<small> a month</small></div>";
+  /* No fake monthly total: when the report's only priced content
+     is the unpriced differentiation row above and the modelled
+     total is zero, the total line is omitted entirely — printing
+     “$0 a month” over a real critical issue is the contradiction
+     this section's no-issues rule already guards against. */
+  var html = (total > 0 || !diffUnpricedRow) ? ("<div class='dol-total'>" + (total > 0 ? money(total) : "$0") + "<small> a month</small></div>") : "";
   html += "<div class='dol-lines'>" + lines.map(function(l){
     return "<div class='dol-line'><span>" + esc(l.label) + (l.detail ? "<span class='" + (l.detailClass || "dol-detail") + "'>" + esc(l.detail) + "</span>" : "") + "</span><span class='amt'>" + (l.amount === null ? "—" : money(l.amount) + "<small>/mo</small>") + (l.note ? "<small>" + esc(l.note) + "</small>" : "") + "</span></div>";
   }).join("") + "</div>";
@@ -8659,6 +8704,40 @@ function renderCustomFixes(a, city, state, check){
       fixes.push(["Grow the review base — " + ctx.reviews + " reviews against " + topR.map(function(c){ return c.reviews; }).join(" and ") + " " + scopeR,
         "<b>Measured from Google's own counts:</b> you have " + ctx.reviews + " reviews" + (ctx.rating && ctx.rating !== "—" ? " at " + ctx.rating + "★" : "") + ". " + scopeR.charAt(0).toUpperCase() + scopeR.slice(1) + ": " + topR.map(function(c){ return "<b>" + esc(c.name) + " — " + c.reviews + " reviews</b>" + (c.rating && c.rating !== "—" ? " at " + c.rating + "★" : ""); }).join("; ") + "." + ratingNote + " <b>The change — a system, not a one-off ask:</b> Stride's weekly family note goes to the family after each visit and carries a Google review button, so families who have just heard about the care that week can leave a review in one tap. That turns happy families into Google reviews every week, instead of a review sprint twice a year. What a family writes in a review is theirs to choose — the count is what this fix builds.",
         bestPromR !== null && bestPromR > a.prominence.score ? ("Prominence " + a.prominence.score + " → toward " + bestPromR + ", the strongest " + scopeR) : "Prominence — depth the listings " + scopeR + " already have"]);
+    }
+    else if (agencyInPackR && packR.length){
+      /* DIFFERENTIATION GAP (Sam, Nov 27 — Right at Home Greater
+         Vancouver: first in the order Places returned, 46 reviews,
+         against Home Instead Vancouver's 49 and West Coast In-Home
+         Care's 56 in the same first 3). The pool above only holds
+         listings returned AHEAD of this agency, so a top-ranked
+         agency whose count trails a listing BELOW it in the first
+         3 measured no gap at all — and a report whose other checks
+         pass printed “No critical issues” while a real reviews gap
+         sat in its own rankings panel. When the agency is in the
+         first 3, trails the highest count among the rest of the
+         first 3, and 20 new reviews would put it ahead of that
+         leader, the gap is a critical differentiation fix: counted
+         in the Critical issues panel, listed here in fix order,
+         and given its problem block below with the actual counts
+         and the +20 move. The review-leader guard stands
+         untouched — an agency that already leads the first 3 on
+         reviews fails the trailing test, so no fix is listed for
+         it and (in the dollar model) no gain is priced. Pricing
+         for this fix follows the existing reviews model exactly:
+         it is priced only where that model yields a nonzero gain,
+         and where the model books zero (already at the top, at
+         full trust) the dollars section shows it unpriced — see
+         renderDollars. */
+      var packSortedR = packR.slice().sort(function(x, y){ return y.reviews - x.reviews; });
+      var leadDiffR = packSortedR[0];
+      if (leadDiffR.reviews > ctx.reviews && ctx.reviews + 20 > leadDiffR.reviews){
+        var topDiffR = packSortedR.slice(0, 2);
+        var ratingNoteDiff = (ctx.rating && ctx.rating !== "—" && !isNaN(parseFloat(ctx.rating)) && parseFloat(ctx.rating) >= 4.8) ? " Your rating is not the problem — " + ctx.rating + "★ is as good as it gets; it's depth." : "";
+        fixes.push(["Grow the review base — " + ctx.reviews + " reviews against " + topDiffR.map(function(c){ return c.reviews; }).join(" and ") + " in the pack",
+          "<b>Measured from Google's own counts:</b> you have " + ctx.reviews + " reviews" + (ctx.rating && ctx.rating !== "—" ? " at " + ctx.rating + "★" : "") + ". In the pack: " + topDiffR.map(function(c){ return "<b>" + esc(c.name) + " — " + c.reviews + " reviews</b>" + (c.rating && c.rating !== "—" ? " at " + c.rating + "★" : ""); }).join("; ") + "." + ratingNoteDiff + " You hold a top spot in this list, but your review count is not the deepest in it — and the count is the proof a family compares first when the top listings otherwise look the same. <b>The move:</b> 20 new reviews take you to " + (ctx.reviews + 20) + " reviews — ahead of " + esc(leadDiffR.name) + "'s " + leadDiffR.reviews + ", the deepest base in the pack. <b>The change — a system, not a one-off ask:</b> Stride's weekly family note goes to the family after each visit and carries a Google review button, so families who have just heard about the care that week can leave a review in one tap. That turns happy families into Google reviews every week, instead of a review sprint twice a year. What a family writes in a review is theirs to choose — the count is what this fix builds.",
+          "Prominence — the deepest review base in the pack: " + (ctx.reviews + 20) + " reviews against " + leadDiffR.reviews]);
+      }
     }
   }
 
