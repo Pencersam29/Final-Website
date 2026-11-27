@@ -4681,17 +4681,27 @@ function corePlacesList(){
   return corePlaces.filter(function(pl){ return norm(pl.name) !== norm((ownerCtx && (ownerCtx.agencyName || ownerCtx.name || ownerCtx.short)) || ""); });
 }
 /* ---------- Reviews already lead the first 3 returned ----------
-   True when the graded agency already sits in the first 3 listings
-   Google Places returned for the core search AND already holds the
-   highest review count among those 3 — UNLESS the rating-gap pattern
-   holds (the agency rates at least 0.3 stars below EVERY other
-   listing in the first 3), where the average, not the count, is the
-   constraint and a reviews gain stays priced. Reads the report's own
-   returned list (ownerCtx.corePlaces, in returned order, agency
-   included) — never the Maps pack, which Places order cannot speak
-   for. Any gap in the data (no returned list, agency not in the
-   first 3, a missing review count) returns false: no suppression
-   without the full picture. */
+   True when the graded agency already holds the highest review
+   count against the first 3 listings Google Places returned for
+   the core search — whether the agency itself sits inside those
+   first 3 or outside them (returned further down the list, or not
+   returned in this window at all) — UNLESS the rating-gap pattern
+   holds (the agency rates at least 0.3 stars below EVERY listing
+   in the first 3, or every other listing when it sits among them),
+   where the average, not the count, is the constraint and a reviews
+   gain stays priced. Inside the first 3, holding the joint-highest
+   count is leading; outside them, the count must be strictly
+   higher than every one of the first 3 (Sam, Nov 27 — Always
+   Assisted Home Care, North Vancouver: 201 reviews at 4.8 stars,
+   returned outside the first 3, whose listings hold 22, 16 and 52
+   reviews at 4.8, 4.9 and 4.8 stars — no rating gap, and no
+   pack-entry gain may be priced off a base that already dwarfs
+   the bar). Reads the report's own returned list
+   (ownerCtx.corePlaces, in returned order) — never the Maps pack,
+   which Places order cannot speak for. Any gap in the data (no
+   returned list, fewer than the full first 3 to compare against
+   when the agency sits outside them, a missing review count)
+   returns false: no suppression without the full picture. */
 function reviewsGainSuppressed(m){
   try {
     if (!ownerCtx || !m) return false;
@@ -4706,14 +4716,27 @@ function reviewsGainSuppressed(m){
       if (ownerCtx.agencyPlaceId && pl.place_id && pl.place_id === ownerCtx.agencyPlaceId){ idx = i; break; }
       if (norm(pl.name || "") === norm(agencyName)){ idx = i; break; }
     }
-    if (idx < 0 || idx > 2) return false;
+    var first3 = raw.slice(0, 3);
+    var inFirst3 = idx >= 0 && idx <= 2;
     var others = [];
-    raw.slice(0, 3).forEach(function(pl2, i2){ if (i2 !== idx) others.push(pl2); });
+    if (inFirst3){
+      first3.forEach(function(pl2, i2){ if (i2 !== idx) others.push(pl2); });
+    } else {
+      /* Outside the first 3 — returned further down the list, or
+         not returned in this window at all (idx -1): the bar is
+         the whole first 3, and all three must be present before
+         anything is suppressed. */
+      if (first3.length < 3) return false;
+      others = first3.slice();
+    }
     if (!others.length) return false;
     for (var j = 0; j < others.length; j++){
       var orev = (others[j].reviews === null || others[j].reviews === undefined) ? null : Number(others[j].reviews);
       if (orev === null || isNaN(orev)) return false;
-      if (rev < orev) return false;
+      /* Inside the first 3, the joint-highest count already leads;
+         outside them, the count must be strictly higher than every
+         one of the first 3. */
+      if (inFirst3 ? (rev < orev) : (rev <= orev)) return false;
     }
     var rating = (m.agencyRatingVal === null || m.agencyRatingVal === undefined || m.agencyRatingVal === "—") ? null : parseFloat(m.agencyRatingVal);
     if (rating !== null && !isNaN(rating)){
@@ -5180,7 +5203,21 @@ function buildDollarModel(){
      returns false and the gain stays exactly as priced today.
      Agencies behind on reviews never meet the condition, so their
      numbers, the in-pack cap and the pack-entry output are
-     untouched. */
+     untouched.
+     EXTENDED Nov 27 (Always Assisted Home Care, North Vancouver):
+     the same guard now fires when the agency sits OUTSIDE the
+     first 3 in Places returned order — 201 reviews at 4.8 stars
+     against first-3 listings on 22, 16 and 52 reviews at 4.8, 4.9
+     and 4.8 stars. The old in-first-3-only test let its report
+     price a +20-reviews pack-entry gain on top of its one
+     non-review issue; with the guard extended, the Stage 2 row
+     below zeroes exactly as it does in-pack, so no “20 more
+     reviews, on top of the fixes above” row prints and the
+     headline carries the non-review issue alone. The rating-gap
+     exception is unchanged in shape: it applies only when the
+     agency rates at least 0.3 stars below every one of the
+     first 3 listings (Always Assisted's gaps are 0, 0.1 and 0 —
+     not it). */
   m.reviewsGainSuppressed = reviewsGainSuppressed(m);
   if (m.reviewsGainSuppressed){
     if (m.stage2 && m.stage2[0]){
